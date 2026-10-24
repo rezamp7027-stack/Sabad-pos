@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import sqlite3
 import sys
 from contextlib import closing, contextmanager
@@ -28,11 +27,23 @@ def data_dir() -> Path:
     ))
     if (legacy != root and (legacy / "sabad.db").is_file()
             and not (root / "sabad.db").exists()):
+        # Use SQLite's online backup API instead of copying the database and WAL
+        # files independently; a live WAL database cannot be safely migrated
+        # with ordinary file copies.
         root.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(legacy / "sabad.db", root / "sabad.db")
-        legacy_wal = legacy / "sabad.db-wal"
-        if legacy_wal.is_file():
-            shutil.copy2(legacy_wal, root / "sabad.db-wal")
+        try:
+            with closing(sqlite3.connect(str(legacy / "sabad.db"), timeout=10)) as source, \
+                    closing(sqlite3.connect(str(root / "sabad.db"), timeout=10)) as target:
+                source.backup(target)
+                if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise sqlite3.DatabaseError("Legacy database integrity check failed")
+        except sqlite3.Error:
+            # Never silently start with a fresh empty database if migration failed.
+            try:
+                (root / "sabad.db").unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     root.mkdir(parents=True, exist_ok=True)
     return root
