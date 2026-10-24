@@ -149,6 +149,17 @@ class ServiceTests(unittest.TestCase):
             services.add_supplier_payment("پخش نمونه", 30001)
         self.assertEqual(services.supplier_balances()[0]["balance"], 30000)
 
+    def test_restore_rejects_unrelated_database_without_changing_live_data(self):
+        self.create_product("10001", "شیر")
+        unrelated = Path(self.temp.name) / "not-sabad.db"
+        import sqlite3
+        with sqlite3.connect(unrelated) as conn:
+            conn.execute("CREATE TABLE random_data(value TEXT)")
+            conn.execute("INSERT INTO random_data VALUES('nope')")
+        with self.assertRaises(services.BusinessError):
+            services.restore_from(unrelated)
+        self.assertIsNotNone(services.get_product_by_barcode("10001"))
+
     def test_restore_backup_creates_safety_copy_and_restores_data(self):
         self.create_product("10001", "شیر")
         backup = Path(self.temp.name) / "restore-source.db"
