@@ -189,6 +189,8 @@ class MainWindow(QMainWindow):
         self.discount.valueChanged.connect(self.refresh_cart)
         self.payment = QComboBox()
         self.payment.addItems(["نقدی", "کارت‌خوان", "کارت به کارت", "اعتباری"])
+        self.customer_name = QLineEdit()
+        self.customer_name.setPlaceholderText("نام مشتری فقط برای فروش اعتباری")
         self.total_label = QLabel("قابل پرداخت: ۰ تومان")
         self.total_label.setStyleSheet("font-size:20px;font-weight:700")
         remove = QPushButton("حذف ردیف")
@@ -202,7 +204,7 @@ class MainWindow(QMainWindow):
         checkout = QPushButton("ثبت نهایی فروش")
         checkout.setStyleSheet("font-weight:700;padding:10px")
         checkout.clicked.connect(self.checkout)
-        for widget in (self.discount, self.payment, edit_qty, edit_price, remove, clear, checkout):
+        for widget in (self.discount, self.payment, self.customer_name, edit_qty, edit_price, remove, clear, checkout):
             bottom.addWidget(widget)
         layout.addLayout(bottom)
         layout.addWidget(self.total_label)
@@ -279,6 +281,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("مانده حساب تأمین‌کنندگان"))
         self.supplier_table = self.table(["تأمین‌کننده", "جمع خرید", "پرداخت‌شده", "مانده بدهی"])
         layout.addWidget(self.supplier_table)
+        layout.addWidget(QLabel("دریافت از مشتریان اعتباری"))
+        customer_form = QFormLayout()
+        self.customer_payment_name = QLineEdit()
+        self.customer_payment_name.setPlaceholderText("نام مشتری مطابق فروش اعتباری")
+        self.customer_payment_amount = QSpinBox()
+        self.customer_payment_amount.setRange(1, 2000000000)
+        self.customer_payment_amount.setSuffix(" تومان")
+        self.customer_payment_note = QLineEdit()
+        customer_form.addRow("مشتری", self.customer_payment_name)
+        customer_form.addRow("مبلغ دریافتی", self.customer_payment_amount)
+        customer_form.addRow("توضیحات", self.customer_payment_note)
+        layout.addLayout(customer_form)
+        customer_pay = QPushButton("ثبت دریافت از مشتری")
+        customer_pay.clicked.connect(self.customer_payment_save)
+        layout.addWidget(customer_pay)
+        layout.addWidget(QLabel("مانده حساب مشتریان اعتباری (مبلغ منفی یعنی بستانکاری مشتری)"))
+        self.customer_table = self.table(["مشتری", "تلفن", "مانده حساب"])
+        layout.addWidget(self.customer_table)
         layout.addStretch()
         self.tabs.addTab(page, "هزینه‌ها و تأمین‌کنندگان")
 
@@ -453,8 +473,12 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            sale = svc.record_sale(list(self.cart.values()), self.discount.value(), self.payment.currentText())
+            sale = svc.record_sale(
+                list(self.cart.values()), self.discount.value(),
+                self.payment.currentText(), self.customer_name.text()
+            )
             self.clear_cart()
+            self.customer_name.clear()
             self.refresh_all()
             self.statusBar().showMessage(f"فروش ثبت شد: {sale['receipt_no']}", 6000)
             answer = QMessageBox.question(self, "فروش ثبت شد", "رسید چاپ شود؟")
@@ -611,6 +635,13 @@ class MainWindow(QMainWindow):
                           money(supplier["paid"]), money(supplier["balance"])]
                 for col, value in enumerate(values):
                     self.supplier_table.setItem(row, col, cell(value))
+        if hasattr(self, "customer_table"):
+            customers = svc.customer_balances()
+            self.customer_table.setRowCount(len(customers))
+            for row, customer in enumerate(customers):
+                values = [customer["name"], customer["phone"], money(customer["balance"]) + " تومان"]
+                for col, value in enumerate(values):
+                    self.customer_table.setItem(row, col, cell(value))
 
     def expense_save(self):
         try:
@@ -687,6 +718,24 @@ class MainWindow(QMainWindow):
                 self, "پرداخت ثبت شد",
                 f"پرداخت {money(result['amount'])} تومان برای {result['supplier']} ثبت شد.\n"
                 f"مانده بدهی: {money(result['balance'])} تومان"
+            )
+        except Exception as exc:
+            self.notify_error(exc)
+
+    def customer_payment_save(self):
+        try:
+            result = svc.add_customer_payment(
+                self.customer_payment_name.text(),
+                self.customer_payment_amount.value(),
+                self.customer_payment_note.text()
+            )
+            self.customer_payment_amount.setValue(1)
+            self.customer_payment_note.clear()
+            self.refresh_all()
+            QMessageBox.information(
+                self, "دریافت ثبت شد",
+                f"دریافت {money(result['amount'])} تومان از {result['customer']} ثبت شد.\n"
+                f"مانده حساب: {money(result['balance'])} تومان"
             )
         except Exception as exc:
             self.notify_error(exc)
