@@ -234,7 +234,7 @@ class MainWindow(QMainWindow):
         self.financial_summary_label.setStyleSheet("font-size:14px;font-weight:600;padding:10px;background:white;border:1px solid #d8dde5;border-radius:8px")
         layout.addWidget(self.financial_summary_label)
         layout.addWidget(QLabel("آخرین فروش‌ها"))
-        self.report_table = self.table(["رسید", "تاریخ", "جمع", "تخفیف", "قابل پرداخت", "روش پرداخت"])
+        self.report_table = self.table(["رسید", "تاریخ", "جمع", "تخفیف", "قابل پرداخت", "روش پرداخت", "وضعیت"])
         layout.addWidget(self.report_table)
         layout.addWidget(QLabel("کالاهای کم‌موجود"))
         self.low_table = self.table(["بارکد", "نام کالا", "موجودی", "حد هشدار"])
@@ -541,10 +541,10 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            rows = svc.sales_report(limit=10000)
+            rows = svc.sales_report(limit=None)
             with open(path, "w", encoding="utf-8-sig", newline="") as stream:
                 writer = csv.writer(stream)
-                writer.writerow(["شماره رسید", "تاریخ", "جمع فاکتور", "تخفیف", "قابل پرداخت", "روش پرداخت"])
+                writer.writerow(["شماره رسید", "تاریخ", "جمع فاکتور", "تخفیف", "قابل پرداخت", "روش پرداخت", "وضعیت"])
                 for sale in rows:
                     writer.writerow([
                         sale["receipt_no"], sale["created_at"], sale["subtotal"],
