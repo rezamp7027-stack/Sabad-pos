@@ -54,6 +54,7 @@ class PurchaseDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.cellDoubleClicked.connect(self.remove_line)
         root.addWidget(self.table)
         self.total = QLabel("جمع خرید: ۰ تومان")
         self.total.setStyleSheet("font-size:20px;font-weight:700")
@@ -107,6 +108,11 @@ class PurchaseDialog(QDialog):
                 self.table.setItem(row, col, item)
             self.table.item(row, 4).setForeground(Qt.GlobalColor.red)
         self.total.setText(f"جمع خرید: {_money(total)} تومان")
+
+    def remove_line(self, row, _column):
+        if 0 <= row < len(self.lines):
+            self.lines.pop(row)
+            self.render_lines()
 
     def save_purchase(self):
         if not self.lines:
