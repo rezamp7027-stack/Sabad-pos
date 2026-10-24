@@ -368,6 +368,14 @@ def return_sale(sale_id, reason="مرجوعی کامل فاکتور"):
                 "amount": int(sale["total"]), "returned_cost": returned_cost}
 
 
+def return_sale_items_by_receipt(receipt_no, quantities, reason="مرجوعی جزئی"):
+    with connect() as c:
+        sale = c.execute("SELECT id FROM sales WHERE receipt_no=?", (str(receipt_no).strip(),)).fetchone()
+    if not sale:
+        raise BusinessError("فاکتور فروش پیدا نشد.")
+    return return_sale_items(sale["id"], quantities, reason)
+
+
 def return_sale_by_receipt(receipt_no, reason="مرجوعی کامل فاکتور"):
     with connect() as c:
         sale = c.execute("SELECT id FROM sales WHERE receipt_no=?", (receipt_no,)).fetchone()
