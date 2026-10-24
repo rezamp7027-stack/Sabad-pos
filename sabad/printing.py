@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from PySide6.QtGui import QTextDocument
+from PySide6.QtGui import QTextDocument, QFont
 from PySide6.QtWidgets import QDialog
 from barcode import Code128
 from barcode.writer import ImageWriter
@@ -35,9 +36,15 @@ def print_text(parent, text):
     dialog = QPrintDialog(printer, parent)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return False
+    escaped = escape(text).replace("\n", "<br>")
     doc = QTextDocument()
-    doc.setDefaultTextOption(__import__("PySide6.QtGui", fromlist=["QTextOption"]).QTextOption())
-    doc.setPlainText(text)
+    doc.setDefaultFont(QFont("Tahoma", 10))
+    doc.setHtml(
+        '<html><head><meta charset="utf-8"></head>'
+        '<body dir="rtl" style="direction:rtl;text-align:right;'
+        'font-family:Tahoma,Arial,sans-serif;font-size:10pt;">'
+        f'{escaped}</body></html>'
+    )
     doc.print_(printer)
     return True
 
