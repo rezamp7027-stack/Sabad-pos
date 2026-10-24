@@ -72,6 +72,34 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(summary["expenses"], 3000)
         self.assertEqual(summary["estimated_profit"], 12000)
 
+    def test_full_sale_return_restores_stock_and_reverses_financial_summary(self):
+        pid = self.create_product(stock=5, buy=20000, sell=30000)
+        sale = services.record_sale([{"product_id": pid, "qty": 2}], discount=5000)
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 3)
+        returned = services.return_sale(sale["id"], "کالای اشتباه")
+        self.assertEqual(returned["amount"], 55000)
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 5)
+        summary = services.financial_summary()
+        self.assertEqual(summary["sales_total"], 0)
+        self.assertEqual(summary["discounts"], 0)
+        self.assertEqual(summary["cost_of_goods"], 0)
+        self.assertEqual(summary["gross_margin"], 0)
+        self.assertEqual(summary["returns_total"], 55000)
+        with db.connect() as conn:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM stock_movements WHERE kind='مرجوعی فروش'"
+            ).fetchone()[0], 1)
+
+    def test_sale_cannot_be_returned_twice(self):
+        pid = self.create_product(stock=5)
+        sale = services.record_sale([{"product_id": pid, "qty": 1}])
+        services.return_sale(sale["id"])
+        with self.assertRaises(services.BusinessError):
+            services.return_sale(sale["id"])
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 5)
+        with db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM sales_returns").fetchone()[0], 1)
+
     def test_expense_and_backup(self):
         self.create_product()
         services.add_expense("برق", 120000, "قبض ماهانه")
