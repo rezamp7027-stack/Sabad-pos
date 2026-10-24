@@ -554,7 +554,7 @@ class MainWindow(QMainWindow):
                     ])
             QMessageBox.information(
                 self, "خروجی آماده شد",
-                f"فایل CSV شامل {len(rows)} فاکتور ذخیره شد:\\n{path}"
+                f"فایل CSV شامل {len(rows)} فاکتور ذخیره شد:\n{path}"
             )
         except Exception as exc:
             self.notify_error(exc)
