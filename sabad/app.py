@@ -215,7 +215,10 @@ class MainWindow(QMainWindow):
         refresh.clicked.connect(self.refresh_reports)
         backup = QPushButton("پشتیبان‌گیری")
         backup.clicked.connect(self.backup)
+        returned = QPushButton("مرجوعی کامل فاکتور انتخابی")
+        returned.clicked.connect(self.return_selected_sale)
         bar.addWidget(refresh)
+        bar.addWidget(returned)
         bar.addWidget(backup)
         bar.addStretch()
         layout.addLayout(bar)
@@ -432,6 +435,35 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.notify_error(exc)
 
+
+    def return_selected_sale(self):
+        row = self.report_table.currentRow()
+        if row < 0:
+            return self.notify_error("ابتدا فاکتور موردنظر را از گزارش فروش انتخاب کنید.")
+        receipt = self.report_table.item(row, 0).text()
+        answer = QMessageBox.question(
+            self, "تأیید مرجوعی",
+            f"کل فاکتور {receipt} مرجوع شود؟ مبلغ فاکتور به‌عنوان مرجوعی ثبت و همه کالاها به موجودی برمی‌گردند. این عملیات قابل برگشت خودکار نیست."
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        reason, accepted = QInputDialog.getText(
+            self, "دلیل مرجوعی", "دلیل مرجوعی (اختیاری):"
+        )
+        if not accepted:
+            return
+        try:
+            result = svc.return_sale_by_receipt(receipt, reason or "مرجوعی کامل فاکتور")
+            self.refresh_all()
+            QMessageBox.information(
+                self, "مرجوعی ثبت شد",
+                f"فاکتور {result['receipt_no']} مرجوع شد.\n"
+                f"مبلغ مرجوعی: {money(result['amount'])} تومان\n"
+                "موجودی تمام اقلام به انبار برگشت."
+            )
+        except Exception as exc:
+            self.notify_error(exc)
+
     def refresh_reports(self):
         if not hasattr(self, "report_table"):
             return
@@ -440,9 +472,10 @@ class MainWindow(QMainWindow):
             f"فروش خالص: {money(summary['sales_total'])} تومان  |  "
             f"بهای تمام‌شده کالای فروخته‌شده: {money(summary['cost_of_goods'])} تومان  |  "
             f"حاشیه سود پیش از تخفیف و هزینه: {money(summary['gross_margin'])} تومان  |  "
-            f"تخفیف‌ها: {money(summary['discounts'])} تومان  |  "
+            f"تخفیف خالص: {money(summary['discounts'])} تومان  |  "
+            f"مرجوعی‌ها: {money(summary['returns_total'])} تومان  |  "
             f"هزینه‌های ثبت‌شده: {money(summary['expenses'])} تومان  |  "
-            f"سود تقریبی پس از تخفیف و هزینه: {money(summary['estimated_profit'])} تومان"
+            f"سود تقریبی پس از تخفیف، مرجوعی و هزینه: {money(summary['estimated_profit'])} تومان"
         )
         sales = svc.sales_report()
         self.report_table.setRowCount(len(sales))
