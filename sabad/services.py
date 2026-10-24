@@ -219,6 +219,89 @@ def record_purchase(lines, supplier="", invoice_no=""):
 
 
 
+def return_sale_items(sale_id, quantities, reason="مرجوعی جزئی"):
+    """Return selected quantities from a sale; repeated partial returns are supported."""
+    if not quantities:
+        raise BusinessError("برای مرجوعی حداقل یک قلم انتخاب کنید.")
+    reason = str(reason or "").strip()
+    with transaction() as c:
+        sale = c.execute("SELECT * FROM sales WHERE id=?", (int(sale_id),)).fetchone()
+        if not sale:
+            raise BusinessError("فاکتور فروش پیدا نشد.")
+        if c.execute("SELECT 1 FROM sales_returns WHERE sale_id=?", (sale["id"],)).fetchone():
+            raise BusinessError("این فاکتور قبلاً به‌طور کامل مرجوع شده است.")
+        items = c.execute(
+            "SELECT * FROM sale_items WHERE sale_id=? ORDER BY id", (sale["id"],)
+        ).fetchall()
+        by_id = {int(item["id"]): item for item in items}
+        requested = {}
+        for entry in quantities:
+            item_id = int(entry["sale_item_id"])
+            qty = float(entry["qty"])
+            if qty <= 0:
+                raise BusinessError("مقدار مرجوعی باید بیشتر از صفر باشد.")
+            if item_id not in by_id:
+                raise BusinessError("قلم انتخاب‌شده متعلق به این فاکتور نیست.")
+            requested[item_id] = requested.get(item_id, 0.0) + qty
+        prepared = []
+        subtotal_amount = 0
+        discount_amount = 0
+        for item_id, qty in requested.items():
+            item = by_id[item_id]
+            already = c.execute(
+                "SELECT COALESCE(SUM(qty),0) FROM sale_return_event_items WHERE sale_item_id=?",
+                (item_id,)
+            ).fetchone()[0]
+            remaining = float(item["qty"]) - float(already)
+            if qty > remaining + 1e-8:
+                raise BusinessError(
+                    f"مقدار مرجوعی «{item['product_name']}» بیشتر از مقدار باقی‌مانده است ({remaining:g})."
+                )
+            gross = round(int(item["line_total"]) * qty / float(item["qty"]))
+            # Allocate the invoice discount proportionally across returned line value.
+            line_discount = round(int(sale["discount"]) * gross / max(1, int(sale["subtotal"])))
+            line_discount = min(gross, line_discount)
+            net = max(0, gross - line_discount)
+            prepared.append((item, qty, gross, line_discount, net))
+            subtotal_amount += gross
+            discount_amount += line_discount
+        prior_amount = c.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM sale_return_events WHERE sale_id=?",
+            (sale["id"],)
+        ).fetchone()[0]
+        amount = max(0, subtotal_amount - discount_amount)
+        if int(prior_amount) + amount > int(sale["total"]):
+            amount = max(0, int(sale["total"]) - int(prior_amount))
+            discount_amount = max(0, subtotal_amount - amount)
+        cur = c.execute(
+            """INSERT INTO sale_return_events
+            (sale_id,receipt_no,amount,subtotal_amount,discount_amount,reason)
+            VALUES(?,?,?,?,?,?)""",
+            (sale["id"], sale["receipt_no"], amount, subtotal_amount, discount_amount, reason)
+        )
+        event_id = cur.lastrowid
+        returned_cost = 0
+        for item, qty, gross, line_discount, net in prepared:
+            c.execute(
+                """INSERT INTO sale_return_event_items
+                (event_id,sale_item_id,product_id,qty,unit_cost,subtotal_amount,discount_amount,amount)
+                VALUES(?,?,?,?,?,?,?,?)""",
+                (event_id, item["id"], item["product_id"], qty, item["unit_cost"],
+                 gross, line_discount, net)
+            )
+            c.execute("UPDATE products SET stock=stock+? WHERE id=?", (qty, item["product_id"]))
+            c.execute(
+                """INSERT INTO stock_movements
+                (product_id,kind,qty,reference,note) VALUES(?,?,?,?,?)""",
+                (item["product_id"], "مرجوعی فروش", qty, sale["receipt_no"],
+                 f"مرجوعی جزئی بابت فاکتور {sale['receipt_no']}")
+            )
+            returned_cost += round(qty * int(item["unit_cost"]))
+        return {"id": event_id, "receipt_no": sale["receipt_no"], "amount": amount,
+                "returned_cost": returned_cost, "subtotal_amount": subtotal_amount,
+                "discount_amount": discount_amount}
+
+
 def return_sale(sale_id, reason="مرجوعی کامل فاکتور"):
     """Return an entire sale exactly once and restore its quantities atomically."""
     reason = str(reason or "").strip()
@@ -229,8 +312,11 @@ def return_sale(sale_id, reason="مرجوعی کامل فاکتور"):
         prior = c.execute(
             "SELECT id FROM sales_returns WHERE sale_id=?", (sale["id"],)
         ).fetchone()
-        if prior:
-            raise BusinessError("این فاکتور قبلاً مرجوع شده است.")
+        partial = c.execute(
+            "SELECT id FROM sale_return_events WHERE sale_id=? LIMIT 1", (sale["id"],)
+        ).fetchone()
+        if prior or partial:
+            raise BusinessError("این فاکتور قبلاً مرجوع شده یا مرجوعی جزئی دارد؛ برای ادامه فقط مقدار باقی‌مانده را مرجوع کنید.")
         items = c.execute(
             "SELECT * FROM sale_items WHERE sale_id=? ORDER BY id", (sale["id"],)
         ).fetchall()
@@ -417,6 +503,8 @@ def dashboard():
                 COALESCE((SELECT SUM(total) FROM sales
                     WHERE date(created_at)=date('now','localtime')),0)
                 - COALESCE((SELECT SUM(amount) FROM sales_returns
+                    WHERE date(created_at)=date('now','localtime')),0)
+                - COALESCE((SELECT SUM(amount) FROM sale_return_events
                     WHERE date(created_at)=date('now','localtime')),0) total,
                 (SELECT COUNT(*) FROM sales
                     WHERE date(created_at)=date('now','localtime')) count"""
@@ -443,7 +531,10 @@ def sales_report(limit=200):
     """Return newest sales with a return-status flag; None means no row limit."""
     with connect() as c:
         query = """SELECT s.*,
-            CASE WHEN r.id IS NULL THEN 0 ELSE 1 END AS is_returned
+            CASE WHEN r.id IS NOT NULL OR
+                COALESCE((SELECT SUM(e.amount) FROM sale_return_events e WHERE e.sale_id=s.id),0)>=s.total
+                THEN 1 ELSE 0 END AS is_returned,
+            COALESCE((SELECT SUM(e.amount) FROM sale_return_events e WHERE e.sale_id=s.id),0) AS partial_return_amount
             FROM sales s LEFT JOIN sales_returns r ON r.sale_id=s.id
             ORDER BY s.id DESC"""
         if limit is None:
@@ -469,28 +560,36 @@ def financial_summary():
             COALESCE(SUM(s.discount),0) discount
             FROM sales_returns r JOIN sales s ON s.id=r.sale_id"""
         ).fetchone()
+        partial_returns = c.execute(
+            """SELECT COALESCE(SUM(amount),0) amount,
+            COALESCE(SUM(subtotal_amount),0) subtotal,
+            COALESCE(SUM(discount_amount),0) discount
+            FROM sale_return_events"""
+        ).fetchone()
         sold_cost = c.execute(
             "SELECT COALESCE(SUM(qty*unit_cost),0) total FROM sale_items"
         ).fetchone()["total"]
         returned_cost = c.execute(
-            "SELECT COALESCE(SUM(qty*unit_cost),0) total FROM sales_return_items"
+            """SELECT
+            COALESCE((SELECT SUM(qty*unit_cost) FROM sales_return_items),0) +
+            COALESCE((SELECT SUM(qty*unit_cost) FROM sale_return_event_items),0) total"""
         ).fetchone()["total"]
         expenses = c.execute(
             "SELECT COALESCE(SUM(amount),0) total FROM expenses"
         ).fetchone()["total"]
-        net_subtotal = int(sales["subtotal"] - returns["subtotal"])
-        net_discounts = int(sales["discount"] - returns["discount"])
+        net_subtotal = int(sales["subtotal"] - returns["subtotal"] - partial_returns["subtotal"])
+        net_discounts = int(sales["discount"] - returns["discount"] - partial_returns["discount"])
         net_cost = round(sold_cost - returned_cost)
         gross_margin = net_subtotal - net_cost
         estimated_profit = gross_margin - net_discounts - int(expenses)
         return {
-            "sales_total": int(sales["total"] - returns["amount"]),
+            "sales_total": int(sales["total"] - returns["amount"] - partial_returns["amount"]),
             "discounts": net_discounts,
             "cost_of_goods": net_cost,
             "gross_margin": gross_margin,
             "expenses": int(expenses),
             "estimated_profit": estimated_profit,
-            "returns_total": int(returns["amount"]),
+            "returns_total": int(returns["amount"] + partial_returns["amount"]),
         }
 
 def low_stock_products():
