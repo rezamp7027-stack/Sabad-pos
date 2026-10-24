@@ -215,11 +215,14 @@ class MainWindow(QMainWindow):
         refresh.clicked.connect(self.refresh_reports)
         backup = QPushButton("پشتیبان‌گیری")
         backup.clicked.connect(self.backup)
+        restore = QPushButton("بازیابی پشتیبان")
+        restore.clicked.connect(self.restore_backup)
         returned = QPushButton("مرجوعی کامل فاکتور انتخابی")
         returned.clicked.connect(self.return_selected_sale)
         bar.addWidget(refresh)
         bar.addWidget(returned)
         bar.addWidget(backup)
+        bar.addWidget(restore)
         bar.addStretch()
         layout.addLayout(bar)
         self.financial_summary_label = QLabel("در حال محاسبه گزارش مالی...")
@@ -524,6 +527,32 @@ class MainWindow(QMainWindow):
             self.exp_note.clear()
             self.refresh_dashboard()
             QMessageBox.information(self, "ثبت شد", "هزینه ثبت شد.")
+        except Exception as exc:
+            self.notify_error(exc)
+
+    def restore_backup(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "انتخاب نسخه پشتیبان", "", "SQLite Database (*.db);;All files (*)"
+        )
+        if not path:
+            return
+        answer = QMessageBox.warning(
+            self, "تأیید بازیابی",
+            "با بازیابی، اطلاعات فعلی با اطلاعات نسخه پشتیبان جایگزین می‌شود. "
+            "قبل از جایگزینی یک نسخه ایمنی خودکار ساخته خواهد شد. ادامه می‌دهید؟",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            safety_path = svc.restore_from(path)
+            self.cart.clear()
+            self.refresh_all()
+            QMessageBox.information(
+                self, "بازیابی کامل شد",
+                f"پشتیبان بازیابی شد. نسخه ایمنی دیتابیس قبلی:\n{safety_path}"
+            )
         except Exception as exc:
             self.notify_error(exc)
 
