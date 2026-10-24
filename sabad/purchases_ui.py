@@ -68,7 +68,16 @@ class PurchaseDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+        self.product.currentIndexChanged.connect(self.product_changed)
         self.refresh_products()
+
+    def product_changed(self, *_):
+        product_id = self.product.currentData()
+        if product_id is None:
+            return
+        product = next((p for p in svc.list_products() if p['id'] == product_id), None)
+        if product:
+            self.cost.setValue(product['purchase_price'])
 
     def refresh_products(self):
         self.product.clear()
