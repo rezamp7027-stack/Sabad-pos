@@ -117,6 +117,18 @@ class ServiceTests(unittest.TestCase):
             services.add_supplier_payment("پخش نمونه", 30001)
         self.assertEqual(services.supplier_balances()[0]["balance"], 30000)
 
+    def test_restore_backup_creates_safety_copy_and_restores_data(self):
+        self.create_product("10001", "شیر")
+        backup = Path(self.temp.name) / "restore-source.db"
+        services.backup_to(backup)
+        self.create_product("10002", "پنیر")
+        safety = services.restore_from(backup)
+        self.assertTrue(safety.exists())
+        self.assertIsNotNone(services.get_product_by_barcode("10001"))
+        self.assertIsNone(services.get_product_by_barcode("10002"))
+        with db.connect() as conn:
+            self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+
     def test_expense_and_backup(self):
         self.create_product()
         services.add_expense("برق", 120000, "قبض ماهانه")
