@@ -253,6 +253,32 @@ def sales_report(limit=200):
         ).fetchall()
 
 
+
+def financial_summary():
+    """Return lifetime sales, COGS, discounts, expenses and estimated net profit."""
+    with connect() as c:
+        sales = c.execute(
+            """SELECT COALESCE(SUM(total),0) total,
+            COALESCE(SUM(discount),0) discount,
+            COALESCE(SUM(subtotal),0) subtotal FROM sales"""
+        ).fetchone()
+        costs = c.execute(
+            "SELECT COALESCE(SUM(qty*unit_cost),0) total FROM sale_items"
+        ).fetchone()["total"]
+        expenses = c.execute(
+            "SELECT COALESCE(SUM(amount),0) total FROM expenses"
+        ).fetchone()["total"]
+        gross_margin = int(sales["subtotal"] - costs)
+        estimated_profit = gross_margin - int(sales["discount"]) - int(expenses)
+        return {
+            "sales_total": int(sales["total"]),
+            "discounts": int(sales["discount"]),
+            "cost_of_goods": round(costs),
+            "gross_margin": gross_margin,
+            "expenses": int(expenses),
+            "estimated_profit": estimated_profit,
+        }
+
 def low_stock_products():
     with connect() as c:
         return c.execute(
