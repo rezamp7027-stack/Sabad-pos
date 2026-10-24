@@ -4,7 +4,8 @@ import sqlite3
 import uuid
 from datetime import datetime
 
-from .db import DB_PATH, connect, initialize, transaction
+from . import db as database
+from .db import connect, initialize, transaction
 
 
 class BusinessError(Exception):
@@ -282,7 +283,7 @@ def restore_from(path):
     """Restore a validated SQLite backup after creating an automatic safety copy."""
     from pathlib import Path
     source_path = Path(path).expanduser().resolve()
-    current_path = Path(DB_PATH).expanduser().resolve()
+    current_path = Path(database.DB_PATH).expanduser().resolve()
     if not source_path.is_file():
         raise BusinessError("فایل پشتیبان پیدا نشد.")
     if source_path == current_path:
