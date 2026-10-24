@@ -192,12 +192,16 @@ class MainWindow(QMainWindow):
         self.total_label.setStyleSheet("font-size:20px;font-weight:700")
         remove = QPushButton("حذف ردیف")
         remove.clicked.connect(self.remove_cart_item)
+        edit_qty = QPushButton("تغییر تعداد")
+        edit_qty.clicked.connect(self.edit_cart_quantity)
+        edit_price = QPushButton("تغییر قیمت")
+        edit_price.clicked.connect(self.edit_cart_price)
         clear = QPushButton("خالی کردن سبد")
         clear.clicked.connect(self.clear_cart)
         checkout = QPushButton("ثبت نهایی فروش")
         checkout.setStyleSheet("font-weight:700;padding:10px")
         checkout.clicked.connect(self.checkout)
-        for widget in (self.discount, self.payment, remove, clear, checkout):
+        for widget in (self.discount, self.payment, edit_qty, edit_price, remove, clear, checkout):
             bottom.addWidget(widget)
         layout.addLayout(bottom)
         layout.addWidget(self.total_label)
@@ -366,6 +370,7 @@ class MainWindow(QMainWindow):
                       money(item["unit_price"]), money(line)]
             for col, value in enumerate(values):
                 self.cart_table.setItem(row, col, cell(value))
+        self.discount.setMaximum(subtotal)
         discount = min(self.discount.value(), subtotal)
         self.total_label.setText(f"قابل پرداخت: {money(max(0, subtotal-discount))} تومان")
 
@@ -373,6 +378,32 @@ class MainWindow(QMainWindow):
         row = self.cart_table.currentRow()
         if row >= 0:
             self.cart.pop(list(self.cart.keys())[row], None)
+            self.refresh_cart()
+
+    def edit_cart_quantity(self):
+        row = self.cart_table.currentRow()
+        if row < 0:
+            return self.notify_error("ابتدا یک ردیف از سبد را انتخاب کنید.")
+        item = self.cart[list(self.cart.keys())[row]]
+        qty, ok = QInputDialog.getDouble(
+            self, "تغییر تعداد", f"تعداد برای {item['name']}:",
+            item["qty"], 0.001, 10000000, 3
+        )
+        if ok:
+            item["qty"] = qty
+            self.refresh_cart()
+
+    def edit_cart_price(self):
+        row = self.cart_table.currentRow()
+        if row < 0:
+            return self.notify_error("ابتدا یک ردیف از سبد را انتخاب کنید.")
+        item = self.cart[list(self.cart.keys())[row]]
+        price, ok = QInputDialog.getInt(
+            self, "تغییر قیمت", f"قیمت هر واحد برای {item['name']} (تومان):",
+            int(item["unit_price"]), 0, 2000000000
+        )
+        if ok:
+            item["unit_price"] = price
             self.refresh_cart()
 
     def clear_cart(self):
