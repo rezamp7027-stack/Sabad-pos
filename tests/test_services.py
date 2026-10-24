@@ -90,6 +90,45 @@ class ServiceTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM stock_movements WHERE kind='مرجوعی فروش'"
             ).fetchone()[0], 1)
 
+    def test_multiple_partial_returns_restore_only_selected_quantities(self):
+        pid = self.create_product(stock=5, buy=20000, sell=30000)
+        sale = services.record_sale([{"product_id": pid, "qty": 2}], discount=6000)
+        item_id = sale["items"][0] if False else None
+        with db.connect() as conn:
+            line = conn.execute(
+                "SELECT id FROM sale_items WHERE sale_id=?", (sale["id"],)
+            ).fetchone()
+        first = services.return_sale_items(sale["id"], [
+            {"sale_item_id": line["id"], "qty": 1}
+        ])
+        self.assertEqual(first["amount"], 27000)
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 4)
+        summary = services.financial_summary()
+        self.assertEqual(summary["sales_total"], sale["total"] - 27000)
+        self.assertEqual(summary["returns_total"], 27000)
+        second = services.return_sale_items(sale["id"], [
+            {"sale_item_id": line["id"], "qty": 1}
+        ])
+        self.assertEqual(second["amount"], 27000)
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 5)
+        summary = services.financial_summary()
+        self.assertEqual(summary["sales_total"], 0)
+        self.assertEqual(summary["returns_total"], sale["total"])
+        with self.assertRaises(services.BusinessError):
+            services.return_sale(sale["id"])
+
+    def test_partial_return_rejects_quantity_above_remaining(self):
+        pid = self.create_product(stock=5)
+        sale = services.record_sale([{"product_id": pid, "qty": 2}])
+        with db.connect() as conn:
+            line = conn.execute(
+                "SELECT id FROM sale_items WHERE sale_id=?", (sale["id"],)
+            ).fetchone()
+        services.return_sale_items(sale["id"], [{"sale_item_id": line["id"], "qty": 1}])
+        with self.assertRaises(services.BusinessError):
+            services.return_sale_items(sale["id"], [{"sale_item_id": line["id"], "qty": 2}])
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 4)
+
     def test_duplicate_product_lines_cannot_oversell_stock(self):
         pid = self.create_product(stock=3)
         with self.assertRaises(services.BusinessError):
