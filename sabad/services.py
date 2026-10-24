@@ -276,6 +276,54 @@ def add_expense(title, amount, note=""):
         )
 
 
+
+def supplier_balances():
+    """Summarize recorded purchases and payments by supplier name."""
+    with connect() as c:
+        return c.execute(
+            """SELECT p.supplier,
+            COALESCE(p.purchased,0) purchased,
+            COALESCE(pay.paid,0) paid,
+            COALESCE(p.purchased,0)-COALESCE(pay.paid,0) balance
+            FROM (
+                SELECT supplier, SUM(total) purchased FROM purchases
+                WHERE TRIM(supplier)<>'' GROUP BY supplier
+            ) p
+            LEFT JOIN (
+                SELECT supplier, SUM(amount) paid FROM supplier_payments
+                GROUP BY supplier
+            ) pay ON pay.supplier=p.supplier
+            ORDER BY balance DESC, p.supplier"""
+        ).fetchall()
+
+
+def add_supplier_payment(supplier, amount, note=""):
+    supplier = str(supplier or "").strip()
+    amount = int(amount)
+    if not supplier or amount <= 0:
+        raise BusinessError("نام تأمین‌کننده و مبلغ پرداخت معتبر الزامی است.")
+    with transaction() as c:
+        purchased = c.execute(
+            "SELECT COALESCE(SUM(total),0) FROM purchases WHERE supplier=?",
+            (supplier,)
+        ).fetchone()[0]
+        paid = c.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE supplier=?",
+            (supplier,)
+        ).fetchone()[0]
+        balance = int(purchased) - int(paid)
+        if purchased <= 0:
+            raise BusinessError("برای این تأمین‌کننده فاکتور خرید ثبت نشده است.")
+        if amount > balance:
+            raise BusinessError(f"مبلغ پرداخت از بدهی ثبت‌شده بیشتر است. مانده: {balance:,} تومان")
+        cur = c.execute(
+            "INSERT INTO supplier_payments(supplier,amount,note) VALUES(?,?,?)",
+            (supplier, amount, str(note or "").strip())
+        )
+        return {"id": cur.lastrowid, "supplier": supplier,
+                "amount": amount, "balance": balance - amount}
+
+
 def dashboard():
     with connect() as c:
         today = c.execute(
