@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 import uuid
 from datetime import datetime
 
@@ -13,7 +14,7 @@ class BusinessError(Exception):
 
 
 def list_products(search=""):
-    with connect() as c:
+    with closing(connect()) as c:
         if search.strip():
             s = f"%{search.strip()}%"
             return c.execute(
@@ -27,7 +28,7 @@ def list_products(search=""):
 
 
 def get_product_by_barcode(barcode):
-    with connect() as c:
+    with closing(connect()) as c:
         return c.execute(
             "SELECT * FROM products WHERE barcode=? AND active=1",
             (barcode.strip(),)
@@ -235,7 +236,7 @@ def record_purchase(lines, supplier="", invoice_no=""):
 
 def sale_returnable_items(receipt_no):
     """List sale lines and quantities still eligible for return."""
-    with connect() as c:
+    with closing(connect()) as c:
         sale = c.execute("SELECT id FROM sales WHERE receipt_no=?", (str(receipt_no).strip(),)).fetchone()
         if not sale:
             raise BusinessError("فاکتور فروش پیدا نشد.")
@@ -427,7 +428,7 @@ def return_sale(sale_id, reason="مرجوعی کامل فاکتور"):
 
 
 def return_sale_items_by_receipt(receipt_no, quantities, reason="مرجوعی جزئی"):
-    with connect() as c:
+    with closing(connect()) as c:
         sale = c.execute("SELECT id FROM sales WHERE receipt_no=?", (str(receipt_no).strip(),)).fetchone()
     if not sale:
         raise BusinessError("فاکتور فروش پیدا نشد.")
@@ -435,7 +436,7 @@ def return_sale_items_by_receipt(receipt_no, quantities, reason="مرجوعی ج
 
 
 def return_sale_by_receipt(receipt_no, reason="مرجوعی کامل فاکتور"):
-    with connect() as c:
+    with closing(connect()) as c:
         sale = c.execute("SELECT id FROM sales WHERE receipt_no=?", (receipt_no,)).fetchone()
     if not sale:
         raise BusinessError("فاکتور فروش پیدا نشد.")
@@ -550,7 +551,7 @@ def _adjust_customer_credit(conn, sale, delta, kind, reference, note):
 
 
 def customer_balances():
-    with connect() as c:
+    with closing(connect()) as c:
         return c.execute(
             """SELECT cu.id,cu.name,cu.phone,
             COALESCE(SUM(l.delta),0) balance
@@ -589,7 +590,7 @@ def add_customer_payment(customer_name, amount, note=""):
 
 def supplier_balances():
     """Summarize recorded purchases and payments by supplier name."""
-    with connect() as c:
+    with closing(connect()) as c:
         return c.execute(
             """SELECT p.supplier,
             COALESCE(p.purchased,0) purchased,
@@ -635,7 +636,7 @@ def add_supplier_payment(supplier, amount, note=""):
 
 
 def dashboard():
-    with connect() as c:
+    with closing(connect()) as c:
         today = c.execute(
             """SELECT
                 COALESCE((SELECT SUM(total) FROM sales
@@ -667,7 +668,7 @@ def dashboard():
 
 def sales_report(limit=200):
     """Return newest sales with a return-status flag; None means no row limit."""
-    with connect() as c:
+    with closing(connect()) as c:
         query = """SELECT s.*,
             CASE WHEN r.id IS NOT NULL OR
                 COALESCE((SELECT SUM(e.amount) FROM sale_return_events e WHERE e.sale_id=s.id),0)>=s.total
@@ -687,7 +688,7 @@ def sales_report(limit=200):
 
 def financial_summary():
     """Return lifetime net figures after full-sale returns; profit remains an estimate."""
-    with connect() as c:
+    with closing(connect()) as c:
         sales = c.execute(
             """SELECT COALESCE(SUM(total),0) total,
             COALESCE(SUM(discount),0) discount,
@@ -732,7 +733,7 @@ def financial_summary():
         }
 
 def low_stock_products():
-    with connect() as c:
+    with closing(connect()) as c:
         return c.execute(
             """SELECT * FROM products WHERE active=1 AND stock<=min_stock
             ORDER BY stock,name"""
