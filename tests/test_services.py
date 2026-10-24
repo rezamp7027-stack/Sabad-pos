@@ -93,7 +93,6 @@ class ServiceTests(unittest.TestCase):
     def test_multiple_partial_returns_restore_only_selected_quantities(self):
         pid = self.create_product(stock=5, buy=20000, sell=30000)
         sale = services.record_sale([{"product_id": pid, "qty": 2}], discount=6000)
-        item_id = sale["items"][0] if False else None
         with db.connect() as conn:
             line = conn.execute(
                 "SELECT id FROM sale_items WHERE sale_id=?", (sale["id"],)
@@ -116,6 +115,36 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(summary["returns_total"], sale["total"])
         with self.assertRaises(services.BusinessError):
             services.return_sale(sale["id"])
+
+    def test_credit_sale_creates_customer_debt_and_payment_reduces_it(self):
+        pid = self.create_product(stock=5)
+        with self.assertRaises(services.BusinessError):
+            services.record_sale([{"product_id": pid, "qty": 1}], payment_method="اعتباری")
+        sale = services.record_sale(
+            [{"product_id": pid, "qty": 2}], payment_method="اعتباری",
+            customer_name="مشتری نمونه"
+        )
+        self.assertEqual(services.customer_balances()[0]["balance"], sale["total"])
+        result = services.add_customer_payment("مشتری نمونه", 20000, "پرداخت اول")
+        self.assertEqual(result["balance"], sale["total"] - 20000)
+        with self.assertRaises(services.BusinessError):
+            services.add_customer_payment("مشتری نمونه", sale["total"])
+        self.assertEqual(services.customer_balances()[0]["balance"], sale["total"] - 20000)
+
+    def test_credit_return_reduces_customer_debt(self):
+        pid = self.create_product(stock=5)
+        sale = services.record_sale(
+            [{"product_id": pid, "qty": 2}], payment_method="اعتباری",
+            customer_name="مشتری مرجوعی"
+        )
+        with db.connect() as conn:
+            line = conn.execute(
+                "SELECT id FROM sale_items WHERE sale_id=?", (sale["id"],)
+            ).fetchone()
+        services.return_sale_items(sale["id"], [{"sale_item_id": line["id"], "qty": 1}])
+        self.assertEqual(services.customer_balances()[0]["balance"], sale["total"] - 30000)
+        services.return_sale(sale["id"])
+        self.assertEqual(services.customer_balances()[0]["balance"], 0)
 
     def test_partial_return_rejects_quantity_above_remaining(self):
         pid = self.create_product(stock=5)
