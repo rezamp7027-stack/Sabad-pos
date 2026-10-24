@@ -251,8 +251,26 @@ class MainWindow(QMainWindow):
         save = QPushButton("ثبت هزینه")
         save.clicked.connect(self.expense_save)
         layout.addWidget(save)
+        layout.addWidget(QLabel("پرداخت به تأمین‌کننده"))
+        supplier_form = QFormLayout()
+        self.supplier_name = QLineEdit()
+        self.supplier_name.setPlaceholderText("نام دقیق تأمین‌کننده مطابق فاکتور خرید")
+        self.supplier_payment_amount = QSpinBox()
+        self.supplier_payment_amount.setRange(1, 2000000000)
+        self.supplier_payment_amount.setSuffix(" تومان")
+        self.supplier_payment_note = QLineEdit()
+        supplier_form.addRow("تأمین‌کننده", self.supplier_name)
+        supplier_form.addRow("مبلغ پرداخت", self.supplier_payment_amount)
+        supplier_form.addRow("توضیحات", self.supplier_payment_note)
+        layout.addLayout(supplier_form)
+        pay = QPushButton("ثبت پرداخت تأمین‌کننده")
+        pay.clicked.connect(self.supplier_payment_save)
+        layout.addWidget(pay)
+        layout.addWidget(QLabel("مانده حساب تأمین‌کنندگان"))
+        self.supplier_table = self.table(["تأمین‌کننده", "جمع خرید", "پرداخت‌شده", "مانده بدهی"])
+        layout.addWidget(self.supplier_table)
         layout.addStretch()
-        self.tabs.addTab(page, "هزینه‌ها")
+        self.tabs.addTab(page, "هزینه‌ها و تأمین‌کنندگان")
 
     def notify_error(self, error):
         QMessageBox.warning(self, "عملیات انجام نشد", str(error))
@@ -489,6 +507,14 @@ class MainWindow(QMainWindow):
         for row, product in enumerate(low):
             for col, value in enumerate([product["barcode"], product["name"], product["stock"], product["min_stock"]]):
                 self.low_table.setItem(row, col, cell(value))
+        if hasattr(self, "supplier_table"):
+            balances = svc.supplier_balances()
+            self.supplier_table.setRowCount(len(balances))
+            for row, supplier in enumerate(balances):
+                values = [supplier["supplier"], money(supplier["purchased"]),
+                          money(supplier["paid"]), money(supplier["balance"])]
+                for col, value in enumerate(values):
+                    self.supplier_table.setItem(row, col, cell(value))
 
     def expense_save(self):
         try:
@@ -498,6 +524,24 @@ class MainWindow(QMainWindow):
             self.exp_note.clear()
             self.refresh_dashboard()
             QMessageBox.information(self, "ثبت شد", "هزینه ثبت شد.")
+        except Exception as exc:
+            self.notify_error(exc)
+
+    def supplier_payment_save(self):
+        try:
+            result = svc.add_supplier_payment(
+                self.supplier_name.text(),
+                self.supplier_payment_amount.value(),
+                self.supplier_payment_note.text()
+            )
+            self.supplier_payment_amount.setValue(1)
+            self.supplier_payment_note.clear()
+            self.refresh_all()
+            QMessageBox.information(
+                self, "پرداخت ثبت شد",
+                f"پرداخت {money(result['amount'])} تومان برای {result['supplier']} ثبت شد.\n"
+                f"مانده بدهی: {money(result['balance'])} تومان"
+            )
         except Exception as exc:
             self.notify_error(exc)
 
