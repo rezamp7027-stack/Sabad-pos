@@ -220,10 +220,13 @@ class MainWindow(QMainWindow):
         restore.clicked.connect(self.restore_backup)
         returned = QPushButton("مرجوعی کامل فاکتور")
         returned.clicked.connect(self.return_selected_sale)
+        partial_returned = QPushButton("مرجوعی جزئی")
+        partial_returned.clicked.connect(self.partial_return_selected_sale)
         export = QPushButton("خروجی CSV فروش‌ها")
         export.clicked.connect(self.export_sales_csv)
         bar.addWidget(refresh)
         bar.addWidget(returned)
+        bar.addWidget(partial_returned)
         bar.addWidget(export)
         bar.addWidget(backup)
         bar.addWidget(restore)
@@ -460,6 +463,85 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.notify_error(exc)
 
+
+    def partial_return_selected_sale(self):
+        row = self.report_table.currentRow()
+        if row >= 0:
+            receipt = self.report_table.item(row, 0).text()
+        else:
+            receipt, accepted = QInputDialog.getText(
+                self, "مرجوعی جزئی", "شماره رسید فاکتور را وارد کنید:"
+            )
+            if not accepted or not receipt.strip():
+                return
+            receipt = receipt.strip()
+        try:
+            lines = svc.sale_returnable_items(receipt)
+        except Exception as exc:
+            return self.notify_error(exc)
+        if not lines:
+            return self.notify_error("اقلام فاکتور پیدا نشدند.")
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"مرجوعی جزئی | {receipt}")
+        dialog.resize(820, 480)
+        dialog.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(
+            "برای هر قلم، مقدار مرجوعی را وارد کنید. صفر یعنی این قلم مرجوع نمی‌شود."
+        ))
+        table = self.table(["کالا", "بارکد", "تعداد فاکتور", "قابل مرجوعی", "مقدار مرجوعی"])
+        widgets = []
+        table.setRowCount(len(lines))
+        for r, line in enumerate(lines):
+            for col, value in enumerate([
+                line["product_name"], line["barcode"], f'{line["qty"]:g}',
+                f'{line["remaining_qty"]:g}'
+            ]):
+                table.setItem(r, col, cell(value))
+            qty = QDoubleSpinBox()
+            qty.setDecimals(3)
+            qty.setRange(0, float(line["remaining_qty"]))
+            qty.setSingleStep(1)
+            qty.setValue(0)
+            table.setCellWidget(r, 4, qty)
+            widgets.append((line["sale_item_id"], qty))
+        layout.addWidget(table)
+        reason = QLineEdit()
+        reason.setPlaceholderText("دلیل مرجوعی (اختیاری)")
+        layout.addWidget(reason)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("ثبت مرجوعی")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        quantities = [
+            {"sale_item_id": item_id, "qty": qty.value()}
+            for item_id, qty in widgets if qty.value() > 0
+        ]
+        if not quantities:
+            return self.notify_error("مقدار مرجوعی را وارد نکردید.")
+        answer = QMessageBox.question(
+            self, "تأیید مرجوعی جزئی",
+            f"مرجوعی ثبت شود؟\nرسید: {receipt}\n"
+            "موجودی اقلام انتخاب‌شده افزایش می‌یابد و این عملیات باید با دقت انجام شود."
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            result = svc.return_sale_items_by_receipt(receipt, quantities, reason.text())
+            self.refresh_all()
+            QMessageBox.information(
+                self, "مرجوعی ثبت شد",
+                f"رسید: {result['receipt_no']}\n"
+                f"مبلغ بازپرداخت ثبت‌شده: {money(result['amount'])} تومان\n"
+                "موجودی اقلام انتخاب‌شده به انبار برگشت."
+            )
+        except Exception as exc:
+            self.notify_error(exc)
 
     def return_selected_sale(self):
         row = self.report_table.currentRow()
