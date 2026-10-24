@@ -103,6 +103,15 @@ CREATE TABLE IF NOT EXISTS sales_return_items (
  line_total INTEGER NOT NULL CHECK(line_total >= 0)
 );
 CREATE INDEX IF NOT EXISTS idx_returns_date ON sales_returns(created_at);
+CREATE TABLE IF NOT EXISTS supplier_payments (
+ id INTEGER PRIMARY KEY,
+ supplier TEXT NOT NULL,
+ amount INTEGER NOT NULL CHECK(amount > 0),
+ note TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_name ON supplier_payments(supplier);
+
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_movements_product ON stock_movements(product_id, created_at);
