@@ -477,15 +477,32 @@ class MainWindow(QMainWindow):
                 list(self.cart.values()), self.discount.value(),
                 self.payment.currentText(), self.customer_name.text()
             )
-            self.clear_cart()
-            self.customer_name.clear()
-            self.refresh_all()
-            self.statusBar().showMessage(f"فروش ثبت شد: {sale['receipt_no']}", 6000)
-            answer = QMessageBox.question(self, "فروش ثبت شد", "رسید چاپ شود؟")
-            if answer == QMessageBox.StandardButton.Yes:
-                print_text(self, receipt_text(sale))
         except Exception as exc:
             self.notify_error(exc)
+            return
+
+        # The sale is already committed. Later UI refresh or printer failures must
+        # never be reported as if the sale itself failed, which could cause a
+        # duplicate sale when the cashier retries.
+        self.clear_cart()
+        self.customer_name.clear()
+        self.statusBar().showMessage(f"فروش ثبت شد: {sale['receipt_no']}", 6000)
+        try:
+            self.refresh_all()
+        except Exception as exc:
+            self.notify_error(
+                f"فروش ثبت شد، اما به‌روزرسانی صفحه با خطا روبه‌رو شد. "
+                f"شماره رسید: {sale['receipt_no']}\n{exc}"
+            )
+        answer = QMessageBox.question(self, "فروش ثبت شد", "رسید چاپ شود؟")
+        if answer == QMessageBox.StandardButton.Yes:
+            try:
+                print_text(self, receipt_text(sale))
+            except Exception as exc:
+                self.notify_error(
+                    f"فروش ثبت شده است، اما چاپ رسید انجام نشد. "
+                    f"شماره رسید: {sale['receipt_no']}\n{exc}"
+                )
 
 
     def partial_return_selected_sale(self):
