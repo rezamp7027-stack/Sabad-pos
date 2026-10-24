@@ -211,6 +211,60 @@ def record_purchase(lines, supplier="", invoice_no=""):
         return {"id": purchase_id, "total": total}
 
 
+
+def return_sale(sale_id, reason="مرجوعی کامل فاکتور"):
+    """Return an entire sale exactly once and restore its quantities atomically."""
+    reason = str(reason or "").strip()
+    with transaction() as c:
+        sale = c.execute("SELECT * FROM sales WHERE id=?", (int(sale_id),)).fetchone()
+        if not sale:
+            raise BusinessError("فاکتور فروش پیدا نشد.")
+        prior = c.execute(
+            "SELECT id FROM sales_returns WHERE sale_id=?", (sale["id"],)
+        ).fetchone()
+        if prior:
+            raise BusinessError("این فاکتور قبلاً مرجوع شده است.")
+        items = c.execute(
+            "SELECT * FROM sale_items WHERE sale_id=? ORDER BY id", (sale["id"],)
+        ).fetchall()
+        if not items:
+            raise BusinessError("اقلام فاکتور پیدا نشدند.")
+        cur = c.execute(
+            "INSERT INTO sales_returns(sale_id,receipt_no,amount,reason) VALUES(?,?,?,?)",
+            (sale["id"], sale["receipt_no"], sale["total"], reason)
+        )
+        return_id = cur.lastrowid
+        returned_cost = 0
+        for item in items:
+            qty = float(item["qty"])
+            returned_cost += round(qty * int(item["unit_cost"]))
+            c.execute(
+                """INSERT INTO sales_return_items
+                (return_id,sale_item_id,product_id,qty,unit_cost,line_total)
+                VALUES(?,?,?,?,?,?)""",
+                (return_id, item["id"], item["product_id"], qty,
+                 item["unit_cost"], item["line_total"])
+            )
+            c.execute("UPDATE products SET stock=stock+? WHERE id=?",
+                      (qty, item["product_id"]))
+            c.execute(
+                """INSERT INTO stock_movements
+                (product_id,kind,qty,reference,note) VALUES(?,?,?,?,?)""",
+                (item["product_id"], "مرجوعی فروش", qty, sale["receipt_no"],
+                 f"بازگشت موجودی بابت فاکتور {sale['receipt_no']}")
+            )
+        return {"id": return_id, "receipt_no": sale["receipt_no"],
+                "amount": int(sale["total"]), "returned_cost": returned_cost}
+
+
+def return_sale_by_receipt(receipt_no, reason="مرجوعی کامل فاکتور"):
+    with connect() as c:
+        sale = c.execute("SELECT id FROM sales WHERE receipt_no=?", (receipt_no,)).fetchone()
+    if not sale:
+        raise BusinessError("فاکتور فروش پیدا نشد.")
+    return return_sale(sale["id"], reason)
+
+
 def add_expense(title, amount, note=""):
     title, amount = title.strip(), int(amount)
     if not title or amount <= 0:
@@ -255,28 +309,41 @@ def sales_report(limit=200):
 
 
 def financial_summary():
-    """Return lifetime sales, COGS, discounts, expenses and estimated net profit."""
+    """Return lifetime net figures after full-sale returns; profit remains an estimate."""
     with connect() as c:
         sales = c.execute(
             """SELECT COALESCE(SUM(total),0) total,
             COALESCE(SUM(discount),0) discount,
             COALESCE(SUM(subtotal),0) subtotal FROM sales"""
         ).fetchone()
-        costs = c.execute(
+        returns = c.execute(
+            """SELECT COALESCE(SUM(r.amount),0) amount,
+            COALESCE(SUM(s.subtotal),0) subtotal,
+            COALESCE(SUM(s.discount),0) discount
+            FROM sales_returns r JOIN sales s ON s.id=r.sale_id"""
+        ).fetchone()
+        sold_cost = c.execute(
             "SELECT COALESCE(SUM(qty*unit_cost),0) total FROM sale_items"
+        ).fetchone()["total"]
+        returned_cost = c.execute(
+            "SELECT COALESCE(SUM(qty*unit_cost),0) total FROM sales_return_items"
         ).fetchone()["total"]
         expenses = c.execute(
             "SELECT COALESCE(SUM(amount),0) total FROM expenses"
         ).fetchone()["total"]
-        gross_margin = int(sales["subtotal"] - costs)
-        estimated_profit = gross_margin - int(sales["discount"]) - int(expenses)
+        net_subtotal = int(sales["subtotal"] - returns["subtotal"])
+        net_discounts = int(sales["discount"] - returns["discount"])
+        net_cost = round(sold_cost - returned_cost)
+        gross_margin = net_subtotal - net_cost
+        estimated_profit = gross_margin - net_discounts - int(expenses)
         return {
-            "sales_total": int(sales["total"]),
-            "discounts": int(sales["discount"]),
-            "cost_of_goods": round(costs),
+            "sales_total": int(sales["total"] - returns["amount"]),
+            "discounts": net_discounts,
+            "cost_of_goods": net_cost,
             "gross_margin": gross_margin,
             "expenses": int(expenses),
             "estimated_profit": estimated_profit,
+            "returns_total": int(returns["amount"]),
         }
 
 def low_stock_products():
