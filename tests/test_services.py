@@ -252,5 +252,33 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0], 1)
 
 
+    def test_partial_returns_round_discount_cumulatively_without_losing_refund(self):
+        pid = self.create_product(stock=5, buy=0, sell=1)
+        sale = services.record_sale(
+            [{"product_id": pid, "qty": 3, "unit_price": 1}], discount=1
+        )
+        self.assertEqual(sale["subtotal"], 3)
+        self.assertEqual(sale["total"], 2)
+        with db.connect() as conn:
+            line_id = conn.execute(
+                "SELECT id FROM sale_items WHERE sale_id=?", (sale["id"],)
+            ).fetchone()["id"]
+
+        amounts = []
+        for _ in range(3):
+            result = services.return_sale_items(
+                sale["id"], [{"sale_item_id": line_id, "qty": 1}]
+            )
+            amounts.append(result["amount"])
+
+        self.assertEqual(sum(amounts), sale["total"])
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 5)
+        summary = services.financial_summary()
+        self.assertEqual(summary["sales_total"], 0)
+        self.assertEqual(summary["returns_total"], sale["total"])
+        row = services.sales_report(limit=None)[0]
+        self.assertEqual(row["is_returned"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
