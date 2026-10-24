@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from .db import initialize
 from . import services as svc
 from .printing import receipt_text, print_text, save_barcode_png
+from .purchases_ui import PurchaseDialog
 
 
 def money(value):
@@ -152,7 +153,8 @@ class MainWindow(QMainWindow):
         tools.addWidget(self.product_search)
         for label, callback in [
             ("کالای جدید", self.new_product), ("ویرایش", self.edit_product),
-            ("اصلاح موجودی", self.stock_adjust), ("ساخت برچسب بارکد", self.make_label)
+            ("ثبت خرید", self.open_purchase), ("اصلاح موجودی", self.stock_adjust),
+            ("ساخت برچسب بارکد", self.make_label)
         ]:
             button = QPushButton(label)
             button.clicked.connect(callback)
@@ -292,6 +294,12 @@ class MainWindow(QMainWindow):
                 self.refresh_all()
             except Exception as exc:
                 self.notify_error(exc)
+
+    def open_purchase(self):
+        dialog = PurchaseDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_all()
+            self.statusBar().showMessage("فاکتور خرید ثبت شد و موجودی به‌روزرسانی شد", 5000)
 
     def stock_adjust(self):
         product = self.selected_product()
