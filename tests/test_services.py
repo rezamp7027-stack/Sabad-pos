@@ -280,5 +280,20 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(row["is_returned"], 1)
 
 
+    def test_restore_rejects_incompatible_schema_without_changing_live_data(self):
+        self.create_product("10001", "شیر")
+        malformed = Path(self.temp.name) / "bad-schema.db"
+        import sqlite3
+        with sqlite3.connect(malformed) as conn:
+            for table in (
+                "products", "sales", "sale_items", "purchases",
+                "purchase_items", "expenses", "stock_movements"
+            ):
+                conn.execute(f'CREATE TABLE "{table}" (id INTEGER PRIMARY KEY)')
+        with self.assertRaises(services.BusinessError):
+            services.restore_from(malformed)
+        self.assertIsNotNone(services.get_product_by_barcode("10001"))
+
+
 if __name__ == "__main__":
     unittest.main()
