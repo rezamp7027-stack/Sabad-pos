@@ -111,10 +111,13 @@ def adjust_stock(product_id, qty_delta, kind="اصلاح موجودی", note="")
         )
 
 
-def record_sale(items, discount=0, payment_method="نقدی"):
+def record_sale(items, discount=0, payment_method="نقدی", customer_name=""):
     if not items:
         raise BusinessError("سبد فروش خالی است.")
     discount = int(discount)
+    customer_name = str(customer_name or "").strip()
+    if payment_method == "اعتباری" and not customer_name:
+        raise BusinessError("برای فروش اعتباری، نام مشتری الزامی است.")
     with transaction() as c:
         normalized, subtotal = [], 0
         requested_by_product = {}
@@ -152,6 +155,17 @@ def record_sale(items, discount=0, payment_method="نقدی"):
             (receipt, subtotal, discount, total, payment_method)
         )
         sale_id = cur.lastrowid
+        if payment_method == "اعتباری":
+            c.execute("INSERT INTO customers(name) VALUES(?) ON CONFLICT(name) DO NOTHING",
+                      (customer_name,))
+            customer_id = c.execute(
+                "SELECT id FROM customers WHERE name=? COLLATE NOCASE", (customer_name,)
+            ).fetchone()["id"]
+            c.execute(
+                """INSERT INTO customer_ledger
+                (customer_id,delta,kind,reference,note) VALUES(?,?,?,?,?)""",
+                (customer_id, total, "فروش اعتباری", receipt, f"فاکتور {receipt}")
+            )
         for p, qty, price, line in normalized:
             c.execute(
                 """INSERT INTO sale_items
@@ -315,6 +329,8 @@ def return_sale_items(sale_id, quantities, reason="مرجوعی جزئی"):
                  f"مرجوعی جزئی بابت فاکتور {sale['receipt_no']}")
             )
             returned_cost += round(qty * int(item["unit_cost"]))
+        _adjust_customer_credit(c, sale, -amount, "مرجوعی اعتباری", sale["receipt_no"],
+                                f"مرجوعی جزئی فاکتور {sale['receipt_no']}")
         return {"id": event_id, "receipt_no": sale["receipt_no"], "amount": amount,
                 "returned_cost": returned_cost, "subtotal_amount": subtotal_amount,
                 "discount_amount": discount_amount}
@@ -364,6 +380,8 @@ def return_sale(sale_id, reason="مرجوعی کامل فاکتور"):
                 (item["product_id"], "مرجوعی فروش", qty, sale["receipt_no"],
                  f"بازگشت موجودی بابت فاکتور {sale['receipt_no']}")
             )
+        _adjust_customer_credit(c, sale, -int(sale["total"]), "مرجوعی اعتباری",
+                                sale["receipt_no"], f"مرجوعی کامل فاکتور {sale['receipt_no']}")
         return {"id": return_id, "receipt_no": sale["receipt_no"],
                 "amount": int(sale["total"]), "returned_cost": returned_cost}
 
@@ -473,6 +491,60 @@ def restore_from(path):
         elif safety_created and safety_path:
             message += f"؛ نسخه ایمنی دیتابیس در این مسیر است: {safety_path}"
         raise BusinessError(message) from exc
+
+
+def _adjust_customer_credit(conn, sale, delta, kind, reference, note):
+    if sale["payment_method"] != "اعتباری" or not delta:
+        return
+    entry = conn.execute(
+        """SELECT customer_id FROM customer_ledger
+        WHERE reference=? AND kind='فروش اعتباری' LIMIT 1""",
+        (sale["receipt_no"],)
+    ).fetchone()
+    if entry:
+        conn.execute(
+            """INSERT INTO customer_ledger
+            (customer_id,delta,kind,reference,note) VALUES(?,?,?,?,?)""",
+            (entry["customer_id"], int(delta), kind, reference, note)
+        )
+
+
+def customer_balances():
+    with connect() as c:
+        return c.execute(
+            """SELECT cu.id,cu.name,cu.phone,
+            COALESCE(SUM(l.delta),0) balance
+            FROM customers cu LEFT JOIN customer_ledger l ON l.customer_id=cu.id
+            GROUP BY cu.id,cu.name,cu.phone ORDER BY balance DESC,cu.name"""
+        ).fetchall()
+
+
+def add_customer_payment(customer_name, amount, note=""):
+    customer_name = str(customer_name or "").strip()
+    amount = int(amount)
+    if not customer_name or amount <= 0:
+        raise BusinessError("نام مشتری و مبلغ پرداخت معتبر الزامی است.")
+    with transaction() as c:
+        customer = c.execute(
+            "SELECT id,name FROM customers WHERE name=? COLLATE NOCASE",
+            (customer_name,)
+        ).fetchone()
+        if not customer:
+            raise BusinessError("مشتری ثبت‌شده‌ای با این نام پیدا نشد.")
+        balance = int(c.execute(
+            "SELECT COALESCE(SUM(delta),0) FROM customer_ledger WHERE customer_id=?",
+            (customer["id"],)
+        ).fetchone()[0])
+        if balance <= 0:
+            raise BusinessError("این مشتری بدهی قابل دریافت ندارد.")
+        if amount > balance:
+            raise BusinessError(f"مبلغ دریافتی از بدهی بیشتر است. مانده: {balance:,} تومان")
+        c.execute(
+            """INSERT INTO customer_ledger
+            (customer_id,delta,kind,reference,note) VALUES(?,?,?,?,?)""",
+            (customer["id"], -amount, "دریافت از مشتری", "", str(note or "").strip())
+        )
+        return {"customer": customer["name"], "amount": amount, "balance": balance - amount}
 
 
 def supplier_balances():
