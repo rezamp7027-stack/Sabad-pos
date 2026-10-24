@@ -219,6 +219,24 @@ def record_purchase(lines, supplier="", invoice_no=""):
 
 
 
+def sale_returnable_items(receipt_no):
+    """List sale lines and quantities still eligible for return."""
+    with connect() as c:
+        sale = c.execute("SELECT id FROM sales WHERE receipt_no=?", (str(receipt_no).strip(),)).fetchone()
+        if not sale:
+            raise BusinessError("فاکتور فروش پیدا نشد.")
+        if c.execute("SELECT 1 FROM sales_returns WHERE sale_id=?", (sale["id"],)).fetchone():
+            raise BusinessError("این فاکتور قبلاً به‌طور کامل مرجوع شده است.")
+        return c.execute(
+            """SELECT i.id AS sale_item_id, i.product_name, i.barcode, i.qty,
+            i.unit_price, i.line_total,
+            MAX(0, i.qty-COALESCE((SELECT SUM(ri.qty) FROM sale_return_event_items ri
+                WHERE ri.sale_item_id=i.id),0)) AS remaining_qty
+            FROM sale_items i WHERE i.sale_id=? ORDER BY i.id""",
+            (sale["id"],)
+        ).fetchall()
+
+
 def return_sale_items(sale_id, quantities, reason="مرجوعی جزئی"):
     """Return selected quantities from a sale; repeated partial returns are supported."""
     if not quantities:
