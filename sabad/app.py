@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
         backup.clicked.connect(self.backup)
         restore = QPushButton("بازیابی پشتیبان")
         restore.clicked.connect(self.restore_backup)
-        returned = QPushButton("مرجوعی کامل فاکتور انتخابی")
+        returned = QPushButton("مرجوعی کامل فاکتور")
         returned.clicked.connect(self.return_selected_sale)
         export = QPushButton("خروجی CSV فروش‌ها")
         export.clicked.connect(self.export_sales_csv)
@@ -463,9 +463,15 @@ class MainWindow(QMainWindow):
 
     def return_selected_sale(self):
         row = self.report_table.currentRow()
-        if row < 0:
-            return self.notify_error("ابتدا فاکتور موردنظر را از گزارش فروش انتخاب کنید.")
-        receipt = self.report_table.item(row, 0).text()
+        if row >= 0:
+            receipt = self.report_table.item(row, 0).text()
+        else:
+            receipt, accepted = QInputDialog.getText(
+                self, "مرجوعی فاکتور", "شماره رسید فاکتور را وارد کنید:"
+            )
+            if not accepted or not receipt.strip():
+                return
+            receipt = receipt.strip()
         answer = QMessageBox.question(
             self, "تأیید مرجوعی",
             f"کل فاکتور {receipt} مرجوع شود؟ مبلغ فاکتور به‌عنوان مرجوعی ثبت و همه کالاها به موجودی برمی‌گردند. این عملیات قابل برگشت خودکار نیست."
