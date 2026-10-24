@@ -619,7 +619,9 @@ class MainWindow(QMainWindow):
         for row, sale in enumerate(sales):
             values = [sale["receipt_no"], sale["created_at"], money(sale["subtotal"]),
                       money(sale["discount"]), money(sale["total"]), sale["payment_method"],
-                      "مرجوع‌شده" if sale["is_returned"] else "فروش"]
+                      ("مرجوع‌شده" if sale["is_returned"] else "مرجوعی جزئی")
+                      if (sale["is_returned"] or sale["has_partial_return"])
+                      else "فروش"]
             for col, value in enumerate(values):
                 self.report_table.setItem(row, col, cell(value))
         low = svc.low_stock_products()
