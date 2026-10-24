@@ -632,7 +632,8 @@ def sales_report(limit=200):
             CASE WHEN r.id IS NOT NULL OR
                 COALESCE((SELECT SUM(e.amount) FROM sale_return_events e WHERE e.sale_id=s.id),0)>=s.total
                 THEN 1 ELSE 0 END AS is_returned,
-            COALESCE((SELECT SUM(e.amount) FROM sale_return_events e WHERE e.sale_id=s.id),0) AS partial_return_amount
+            COALESCE((SELECT SUM(e.amount) FROM sale_return_events e WHERE e.sale_id=s.id),0) AS partial_return_amount,
+            EXISTS(SELECT 1 FROM sale_return_events e WHERE e.sale_id=s.id) AS has_partial_return
             FROM sales s LEFT JOIN sales_returns r ON r.sale_id=s.id
             ORDER BY s.id DESC"""
         if limit is None:
