@@ -479,10 +479,26 @@ def restore_from(path):
         tables = {row[0] for row in source.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
-        required = {"products", "sales", "sale_items", "purchases",
-                    "purchase_items", "expenses", "stock_movements"}
-        if not required.issubset(tables):
+        required_columns = {
+            "products": {"id", "barcode", "name", "category", "unit", "purchase_price",
+                         "sale_price", "stock", "min_stock", "active", "created_at"},
+            "sales": {"id", "receipt_no", "subtotal", "discount", "total",
+                      "payment_method", "created_at"},
+            "sale_items": {"id", "sale_id", "product_id", "product_name", "barcode",
+                           "qty", "unit_price", "unit_cost", "line_total"},
+            "purchases": {"id", "supplier", "invoice_no", "total", "created_at"},
+            "purchase_items": {"id", "purchase_id", "product_id", "qty", "unit_cost", "line_total"},
+            "expenses": {"id", "title", "amount", "note", "created_at"},
+            "stock_movements": {"id", "product_id", "kind", "qty", "reference", "note", "created_at"},
+        }
+        if not set(required_columns).issubset(tables):
             raise BusinessError("این فایل، نسخه پشتیبان معتبر سبد نیست.")
+        for table, expected in required_columns.items():
+            actual = {row[1] for row in source.execute(f'PRAGMA table_info("{table}")')}
+            if not expected.issubset(actual):
+                raise BusinessError(
+                    f"ساختار جدول «{table}» با نسخه پشتیبان سبد سازگار نیست."
+                )
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         safety_path = current_path.with_name(
