@@ -85,6 +85,24 @@ CREATE TABLE IF NOT EXISTS stock_movements (
  note TEXT NOT NULL DEFAULT '',
  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+CREATE TABLE IF NOT EXISTS sales_returns (
+ id INTEGER PRIMARY KEY,
+ sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id),
+ receipt_no TEXT NOT NULL,
+ amount INTEGER NOT NULL CHECK(amount >= 0),
+ reason TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS sales_return_items (
+ id INTEGER PRIMARY KEY,
+ return_id INTEGER NOT NULL REFERENCES sales_returns(id),
+ sale_item_id INTEGER NOT NULL REFERENCES sale_items(id),
+ product_id INTEGER NOT NULL REFERENCES products(id),
+ qty REAL NOT NULL CHECK(qty > 0),
+ unit_cost INTEGER NOT NULL CHECK(unit_cost >= 0),
+ line_total INTEGER NOT NULL CHECK(line_total >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_returns_date ON sales_returns(created_at);
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_movements_product ON stock_movements(product_id, created_at);
