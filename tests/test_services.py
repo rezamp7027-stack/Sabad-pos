@@ -100,6 +100,23 @@ class ServiceTests(unittest.TestCase):
         with db.connect() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM sales_returns").fetchone()[0], 1)
 
+    def test_supplier_payment_updates_balance_and_rejects_overpayment(self):
+        pid = self.create_product(stock=0)
+        services.record_purchase(
+            [{"product_id": pid, "qty": 5, "unit_cost": 20000}],
+            supplier="پخش نمونه", invoice_no="SUP-1"
+        )
+        result = services.add_supplier_payment("پخش نمونه", 70000, "پرداخت اول")
+        self.assertEqual(result["balance"], 30000)
+        balances = services.supplier_balances()
+        self.assertEqual(len(balances), 1)
+        self.assertEqual(balances[0]["purchased"], 100000)
+        self.assertEqual(balances[0]["paid"], 70000)
+        self.assertEqual(balances[0]["balance"], 30000)
+        with self.assertRaises(services.BusinessError):
+            services.add_supplier_payment("پخش نمونه", 30001)
+        self.assertEqual(services.supplier_balances()[0]["balance"], 30000)
+
     def test_expense_and_backup(self):
         self.create_product()
         services.add_expense("برق", 120000, "قبض ماهانه")
