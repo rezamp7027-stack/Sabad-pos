@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import csv
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QFont, QDesktopServices
 from PySide6.QtWidgets import (
@@ -219,8 +220,11 @@ class MainWindow(QMainWindow):
         restore.clicked.connect(self.restore_backup)
         returned = QPushButton("مرجوعی کامل فاکتور انتخابی")
         returned.clicked.connect(self.return_selected_sale)
+        export = QPushButton("خروجی CSV فروش‌ها")
+        export.clicked.connect(self.export_sales_csv)
         bar.addWidget(refresh)
         bar.addWidget(returned)
+        bar.addWidget(export)
         bar.addWidget(backup)
         bar.addWidget(restore)
         bar.addStretch()
@@ -527,6 +531,29 @@ class MainWindow(QMainWindow):
             self.exp_note.clear()
             self.refresh_dashboard()
             QMessageBox.information(self, "ثبت شد", "هزینه ثبت شد.")
+        except Exception as exc:
+            self.notify_error(exc)
+
+    def export_sales_csv(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "خروجی فروش‌ها", "sabad-sales.csv", "CSV (*.csv)"
+        )
+        if not path:
+            return
+        try:
+            rows = svc.sales_report(limit=10000)
+            with open(path, "w", encoding="utf-8-sig", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["شماره رسید", "تاریخ", "جمع فاکتور", "تخفیف", "قابل پرداخت", "روش پرداخت"])
+                for sale in rows:
+                    writer.writerow([
+                        sale["receipt_no"], sale["created_at"], sale["subtotal"],
+                        sale["discount"], sale["total"], sale["payment_method"]
+                    ])
+            QMessageBox.information(
+                self, "خروجی آماده شد",
+                f"فایل CSV شامل {len(rows)} فاکتور ذخیره شد:\\n{path}"
+            )
         except Exception as exc:
             self.notify_error(exc)
 
