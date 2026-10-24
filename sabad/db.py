@@ -124,6 +124,31 @@ CREATE TABLE IF NOT EXISTS sales_return_items (
  line_total INTEGER NOT NULL CHECK(line_total >= 0)
 );
 CREATE INDEX IF NOT EXISTS idx_returns_date ON sales_returns(created_at);
+
+-- Separate event tables allow multiple partial returns without breaking older databases.
+CREATE TABLE IF NOT EXISTS sale_return_events (
+ id INTEGER PRIMARY KEY,
+ sale_id INTEGER NOT NULL REFERENCES sales(id),
+ receipt_no TEXT NOT NULL,
+ amount INTEGER NOT NULL CHECK(amount >= 0),
+ subtotal_amount INTEGER NOT NULL CHECK(subtotal_amount >= 0),
+ discount_amount INTEGER NOT NULL CHECK(discount_amount >= 0),
+ reason TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_sale_return_events_sale ON sale_return_events(sale_id);
+CREATE INDEX IF NOT EXISTS idx_sale_return_events_date ON sale_return_events(created_at);
+CREATE TABLE IF NOT EXISTS sale_return_event_items (
+ id INTEGER PRIMARY KEY,
+ event_id INTEGER NOT NULL REFERENCES sale_return_events(id),
+ sale_item_id INTEGER NOT NULL REFERENCES sale_items(id),
+ product_id INTEGER NOT NULL REFERENCES products(id),
+ qty REAL NOT NULL CHECK(qty > 0),
+ unit_cost INTEGER NOT NULL CHECK(unit_cost >= 0),
+ subtotal_amount INTEGER NOT NULL CHECK(subtotal_amount >= 0),
+ discount_amount INTEGER NOT NULL CHECK(discount_amount >= 0),
+ amount INTEGER NOT NULL CHECK(amount >= 0)
+);
 CREATE TABLE IF NOT EXISTS supplier_payments (
  id INTEGER PRIMARY KEY,
  supplier TEXT NOT NULL,
