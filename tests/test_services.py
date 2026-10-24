@@ -143,7 +143,7 @@ class ServiceTests(unittest.TestCase):
             ).fetchone()
         services.return_sale_items(sale["id"], [{"sale_item_id": line["id"], "qty": 1}])
         self.assertEqual(services.customer_balances()[0]["balance"], sale["total"] - 30000)
-        services.return_sale(sale["id"])
+        services.return_sale_items(sale["id"], [{"sale_item_id": line["id"], "qty": 1}])
         self.assertEqual(services.customer_balances()[0]["balance"], 0)
 
     def test_partial_return_rejects_quantity_above_remaining(self):
