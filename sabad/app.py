@@ -219,6 +219,10 @@ class MainWindow(QMainWindow):
         bar.addWidget(backup)
         bar.addStretch()
         layout.addLayout(bar)
+        self.financial_summary_label = QLabel("در حال محاسبه گزارش مالی...")
+        self.financial_summary_label.setWordWrap(True)
+        self.financial_summary_label.setStyleSheet("font-size:14px;font-weight:600;padding:10px;background:white;border:1px solid #d8dde5;border-radius:8px")
+        layout.addWidget(self.financial_summary_label)
         layout.addWidget(QLabel("آخرین فروش‌ها"))
         self.report_table = self.table(["رسید", "تاریخ", "جمع", "تخفیف", "قابل پرداخت", "روش پرداخت"])
         layout.addWidget(self.report_table)
@@ -431,6 +435,15 @@ class MainWindow(QMainWindow):
     def refresh_reports(self):
         if not hasattr(self, "report_table"):
             return
+        summary = svc.financial_summary()
+        self.financial_summary_label.setText(
+            f"فروش خالص: {money(summary['sales_total'])} تومان  |  "
+            f"بهای تمام‌شده کالای فروخته‌شده: {money(summary['cost_of_goods'])} تومان  |  "
+            f"حاشیه سود پیش از تخفیف و هزینه: {money(summary['gross_margin'])} تومان  |  "
+            f"تخفیف‌ها: {money(summary['discounts'])} تومان  |  "
+            f"هزینه‌های ثبت‌شده: {money(summary['expenses'])} تومان  |  "
+            f"سود تقریبی پس از تخفیف و هزینه: {money(summary['estimated_profit'])} تومان"
+        )
         sales = svc.sales_report()
         self.report_table.setRowCount(len(sales))
         for row, sale in enumerate(sales):
