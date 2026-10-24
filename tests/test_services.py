@@ -90,6 +90,38 @@ class ServiceTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM stock_movements WHERE kind='مرجوعی فروش'"
             ).fetchone()[0], 1)
 
+    def test_duplicate_product_lines_cannot_oversell_stock(self):
+        pid = self.create_product(stock=3)
+        with self.assertRaises(services.BusinessError):
+            services.record_sale([
+                {"product_id": pid, "qty": 2},
+                {"product_id": pid, "qty": 2},
+            ])
+        self.assertEqual(services.get_product_by_barcode("10001")["stock"], 3)
+        with db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 0)
+
+    def test_dashboard_net_sales_reflects_same_day_full_return(self):
+        pid = self.create_product(stock=5)
+        sale = services.record_sale([{"product_id": pid, "qty": 1}])
+        self.assertEqual(services.dashboard()["sales"], sale["total"])
+        services.return_sale(sale["id"])
+        self.assertEqual(services.dashboard()["sales"], 0)
+
+    def test_sales_report_includes_return_status_and_unlimited_export(self):
+        pid = self.create_product(stock=5)
+        sale = services.record_sale([{"product_id": pid, "qty": 1}])
+        services.return_sale(sale["id"])
+        rows = services.sales_report(limit=None)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["receipt_no"], sale["receipt_no"])
+        self.assertEqual(rows[0]["is_returned"], 1)
+        self.assertEqual(len(services.sales_report(limit=1)), 1)
+
+    def test_backup_rejects_active_database_path(self):
+        with self.assertRaises(services.BusinessError):
+            services.backup_to(db.DB_PATH)
+
     def test_sale_cannot_be_returned_twice(self):
         pid = self.create_product(stock=5)
         sale = services.record_sale([{"product_id": pid, "qty": 1}])
