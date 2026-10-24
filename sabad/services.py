@@ -4,7 +4,7 @@ import sqlite3
 import uuid
 from datetime import datetime
 
-from .db import connect, transaction
+from .db import DB_PATH, connect, transaction
 
 
 class BusinessError(Exception):
@@ -275,6 +275,46 @@ def add_expense(title, amount, note=""):
             (title, amount, note.strip())
         )
 
+
+
+
+def restore_from(path):
+    """Restore a validated SQLite backup after creating an automatic safety copy."""
+    from pathlib import Path
+    source_path = Path(path).expanduser().resolve()
+    current_path = Path(DB_PATH).expanduser().resolve()
+    if not source_path.is_file():
+        raise BusinessError("فایل پشتیبان پیدا نشد.")
+    if source_path == current_path:
+        raise BusinessError("فایل پشتیبان نباید همان دیتابیس فعال باشد.")
+    try:
+        source = sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True, timeout=10)
+        try:
+            integrity = source.execute("PRAGMA integrity_check").fetchone()[0]
+            if integrity != "ok":
+                raise BusinessError("فایل پشتیبان سالم نیست و بازیابی انجام نشد.")
+            tables = {row[0] for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            required = {"products", "sales", "sale_items", "purchases",
+                        "purchase_items", "expenses", "stock_movements"}
+            if not required.issubset(tables):
+                raise BusinessError("این فایل، نسخه پشتیبان معتبر سبد نیست.")
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            safety_path = current_path.with_name(current_path.name + f".pre-restore-{stamp}.db")
+            backup_to(safety_path)
+            destination = connect()
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+        finally:
+            source.close()
+    except BusinessError:
+        raise
+    except (sqlite3.Error, OSError) as exc:
+        raise BusinessError(f"بازیابی پشتیبان انجام نشد: {exc}") from exc
+    return safety_path
 
 
 def supplier_balances():
