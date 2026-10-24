@@ -286,44 +286,81 @@ def add_expense(title, amount, note=""):
 
 
 def restore_from(path):
-    """Restore a validated SQLite backup after creating an automatic safety copy."""
+    """Restore a validated SQLite backup and roll back to a safety copy on failure."""
     from pathlib import Path
+
     source_path = Path(path).expanduser().resolve()
     current_path = Path(database.DB_PATH).expanduser().resolve()
     if not source_path.is_file():
         raise BusinessError("فایل پشتیبان پیدا نشد.")
     if source_path == current_path:
         raise BusinessError("فایل پشتیبان نباید همان دیتابیس فعال باشد.")
+
+    safety_path = None
+    safety_created = False
+    source = None
     try:
-        source = sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True, timeout=10)
+        source = sqlite3.connect(str(source_path), timeout=10)
+        source.execute("PRAGMA query_only=ON")
+        integrity = source.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise BusinessError("فایل پشتیبان سالم نیست و بازیابی انجام نشد.")
+        tables = {row[0] for row in source.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        required = {"products", "sales", "sale_items", "purchases",
+                    "purchase_items", "expenses", "stock_movements"}
+        if not required.issubset(tables):
+            raise BusinessError("این فایل، نسخه پشتیبان معتبر سبد نیست.")
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        safety_path = current_path.with_name(
+            current_path.name + f".pre-restore-{stamp}.db"
+        )
+        backup_to(safety_path)
+        safety_created = True
+
+        destination = connect()
         try:
-            integrity = source.execute("PRAGMA integrity_check").fetchone()[0]
-            if integrity != "ok":
-                raise BusinessError("فایل پشتیبان سالم نیست و بازیابی انجام نشد.")
-            tables = {row[0] for row in source.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()}
-            required = {"products", "sales", "sale_items", "purchases",
-                        "purchase_items", "expenses", "stock_movements"}
-            if not required.issubset(tables):
-                raise BusinessError("این فایل، نسخه پشتیبان معتبر سبد نیست.")
-            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            safety_path = current_path.with_name(current_path.name + f".pre-restore-{stamp}.db")
-            backup_to(safety_path)
-            destination = connect()
-            try:
-                source.backup(destination)
-            finally:
-                destination.close()
+            source.backup(destination)
         finally:
-            source.close()
-        # Older backups may not contain tables added by newer app versions.
+            destination.close()
+        source.close()
+        source = None
+
+        # Add any tables introduced in newer versions to an older restored backup.
         initialize()
-    except BusinessError:
-        raise
-    except (sqlite3.Error, OSError) as exc:
-        raise BusinessError(f"بازیابی پشتیبان انجام نشد: {exc}") from exc
-    return safety_path
+        return safety_path
+    except Exception as exc:
+        if source is not None:
+            source.close()
+        rollback_error = None
+        if safety_created and safety_path is not None and safety_path.is_file():
+            try:
+                safety = sqlite3.connect(str(safety_path), timeout=10)
+                try:
+                    destination = connect()
+                    try:
+                        safety.backup(destination)
+                    finally:
+                        destination.close()
+                finally:
+                    safety.close()
+                initialize()
+            except Exception as rollback_exc:
+                rollback_error = rollback_exc
+        if isinstance(exc, BusinessError):
+            if rollback_error:
+                raise BusinessError(
+                    f"{exc} همچنین بازگردانی نسخه ایمنی خودکار ناموفق بود: {rollback_error}"
+                ) from exc
+            raise
+        message = f"بازیابی پشتیبان انجام نشد: {exc}"
+        if rollback_error:
+            message += f"؛ بازگردانی نسخه ایمنی نیز ناموفق بود: {rollback_error}"
+        elif safety_created and safety_path:
+            message += f"؛ نسخه ایمنی دیتابیس در این مسیر است: {safety_path}"
+        raise BusinessError(message) from exc
 
 
 def supplier_balances():
