@@ -117,24 +117,30 @@ def record_sale(items, discount=0, payment_method="نقدی"):
     discount = int(discount)
     with transaction() as c:
         normalized, subtotal = [], 0
+        requested_by_product = {}
         for item in items:
             qty = float(item["qty"])
             if qty <= 0:
                 raise BusinessError("تعداد باید بیشتر از صفر باشد.")
+            product_id = int(item["product_id"])
             p = c.execute(
                 "SELECT * FROM products WHERE id=? AND active=1",
-                (item["product_id"],)
+                (product_id,)
             ).fetchone()
             if not p:
                 raise BusinessError("یکی از کالاها دیگر در دسترس نیست.")
-            if float(p["stock"]) < qty:
-                raise BusinessError(f"موجودی «{p['name']}» کافی نیست.")
+            requested_by_product[product_id] = requested_by_product.get(product_id, 0.0) + qty
             price = int(item.get("unit_price", p["sale_price"]))
             if price < 0:
                 raise BusinessError("قیمت فروش نامعتبر است.")
             line = round(qty * price)
             subtotal += line
             normalized.append((p, qty, price, line))
+
+        for product_id, requested_qty in requested_by_product.items():
+            p = c.execute("SELECT name,stock FROM products WHERE id=?", (product_id,)).fetchone()
+            if float(p["stock"]) < requested_qty:
+                raise BusinessError(f"موجودی «{p['name']}» کافی نیست.")
 
         if discount < 0 or discount > subtotal:
             raise BusinessError("تخفیف باید بین صفر و جمع فاکتور باشد.")
@@ -370,8 +376,13 @@ def add_supplier_payment(supplier, amount, note=""):
 def dashboard():
     with connect() as c:
         today = c.execute(
-            """SELECT COALESCE(SUM(total),0) total, COUNT(*) count FROM sales
-            WHERE date(created_at)=date('now','localtime')"""
+            """SELECT
+                COALESCE((SELECT SUM(total) FROM sales
+                    WHERE date(created_at)=date('now','localtime')),0)
+                - COALESCE((SELECT SUM(amount) FROM sales_returns
+                    WHERE date(created_at)=date('now','localtime')),0) total,
+                (SELECT COUNT(*) FROM sales
+                    WHERE date(created_at)=date('now','localtime')) count"""
         ).fetchone()
         stock = c.execute(
             """SELECT COUNT(*) n, COALESCE(SUM(stock*purchase_price),0) value
@@ -392,10 +403,18 @@ def dashboard():
 
 
 def sales_report(limit=200):
+    """Return newest sales with a return-status flag; None means no row limit."""
     with connect() as c:
-        return c.execute(
-            "SELECT * FROM sales ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
+        query = """SELECT s.*,
+            CASE WHEN r.id IS NULL THEN 0 ELSE 1 END AS is_returned
+            FROM sales s LEFT JOIN sales_returns r ON r.sale_id=s.id
+            ORDER BY s.id DESC"""
+        if limit is None:
+            return c.execute(query).fetchall()
+        limit = int(limit)
+        if limit < 1:
+            raise BusinessError("محدودیت گزارش باید بیشتر از صفر باشد.")
+        return c.execute(query + " LIMIT ?", (limit,)).fetchall()
 
 
 
@@ -446,12 +465,25 @@ def low_stock_products():
 
 
 def backup_to(path):
+    from pathlib import Path
+
+    target = Path(path).expanduser().resolve()
+    active = Path(database.DB_PATH).expanduser().resolve()
+    if target == active:
+        raise BusinessError("مسیر نسخه پشتیبان نباید با دیتابیس فعال یکسان باشد.")
+    target.parent.mkdir(parents=True, exist_ok=True)
     source = connect()
     try:
-        dest = sqlite3.connect(str(path))
+        dest = sqlite3.connect(str(target), timeout=10)
         try:
             source.backup(dest)
+            result = dest.execute("PRAGMA integrity_check").fetchone()[0]
+            if result != "ok":
+                raise BusinessError("بررسی سلامت نسخه پشتیبان ناموفق بود.")
         finally:
             dest.close()
+    except sqlite3.Error as exc:
+        raise BusinessError(f"پشتیبان‌گیری انجام نشد: {exc}") from exc
     finally:
         source.close()
+    return target
