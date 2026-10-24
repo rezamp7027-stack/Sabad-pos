@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -10,9 +13,27 @@ APP_NAME = "SabadPOS"
 
 
 def data_dir() -> Path:
-    root = Path(QStandardPaths.writableLocation(
+    """Use a stable per-application path, independent of QApplication startup order."""
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    root = base / APP_NAME
+
+    # Migrate a database created by older builds that relied on Qt's implicit app name.
+    legacy = Path(QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.AppLocalDataLocation
     ))
+    if (legacy != root and (legacy / "sabad.db").is_file()
+            and not (root / "sabad.db").exists()):
+        root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy / "sabad.db", root / "sabad.db")
+        legacy_wal = legacy / "sabad.db-wal"
+        if legacy_wal.is_file():
+            shutil.copy2(legacy_wal, root / "sabad.db-wal")
+
     root.mkdir(parents=True, exist_ok=True)
     return root
 
