@@ -158,6 +158,24 @@ CREATE TABLE IF NOT EXISTS supplier_payments (
 );
 CREATE INDEX IF NOT EXISTS idx_supplier_payments_name ON supplier_payments(supplier);
 
+CREATE TABLE IF NOT EXISTS customers (
+ id INTEGER PRIMARY KEY,
+ name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ phone TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS customer_ledger (
+ id INTEGER PRIMARY KEY,
+ customer_id INTEGER NOT NULL REFERENCES customers(id),
+ delta INTEGER NOT NULL,
+ kind TEXT NOT NULL,
+ reference TEXT NOT NULL DEFAULT '',
+ note TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer ON customer_ledger(customer_id, created_at);
+
+
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_movements_product ON stock_movements(product_id, created_at);
