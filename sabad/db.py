@@ -4,7 +4,7 @@ import os
 import shutil
 import sqlite3
 import sys
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
@@ -192,7 +192,7 @@ def connect():
 
 
 def initialize():
-    with connect() as conn:
+    with closing(connect()) as conn:
         conn.executescript(SCHEMA)
 
 
