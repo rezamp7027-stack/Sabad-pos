@@ -275,36 +275,76 @@ def return_sale_items(sale_id, quantities, reason="مرجوعی جزئی"):
             if item_id not in by_id:
                 raise BusinessError("قلم انتخاب‌شده متعلق به این فاکتور نیست.")
             requested[item_id] = requested.get(item_id, 0.0) + qty
-        prepared = []
+        prepared_gross = []
         subtotal_amount = 0
-        discount_amount = 0
-        for item_id, qty in requested.items():
+        # Track each line's cumulative returned quantity/value so repeated partial
+        # returns sum exactly to the original line total despite integer rounding.
+        for item_id, qty in sorted(requested.items()):
             item = by_id[item_id]
-            already = c.execute(
-                "SELECT COALESCE(SUM(qty),0) FROM sale_return_event_items WHERE sale_item_id=?",
+            returned = c.execute(
+                """SELECT COALESCE(SUM(qty),0) qty,
+                COALESCE(SUM(subtotal_amount),0) gross
+                FROM sale_return_event_items WHERE sale_item_id=?""",
                 (item_id,)
-            ).fetchone()[0]
-            remaining = float(item["qty"]) - float(already)
+            ).fetchone()
+            already_qty = float(returned["qty"])
+            remaining = float(item["qty"]) - already_qty
             if qty > remaining + 1e-8:
                 raise BusinessError(
                     f"مقدار مرجوعی «{item['product_name']}» بیشتر از مقدار باقی‌مانده است ({remaining:g})."
                 )
-            gross = round(int(item["line_total"]) * qty / float(item["qty"]))
-            # Allocate the invoice discount proportionally across returned line value.
-            line_discount = round(int(sale["discount"]) * gross / max(1, int(sale["subtotal"])))
-            line_discount = min(gross, line_discount)
-            net = max(0, gross - line_discount)
-            prepared.append((item, qty, gross, line_discount, net))
+            gross_before = int(returned["gross"])
+            gross_after = round(
+                int(item["line_total"]) * min(float(item["qty"]), already_qty + qty)
+                / float(item["qty"])
+            )
+            gross = max(0, gross_after - gross_before)
+            prepared_gross.append((item, qty, gross))
             subtotal_amount += gross
-            discount_amount += line_discount
-        prior_amount = c.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM sale_return_events WHERE sale_id=?",
+
+        prior = c.execute(
+            """SELECT COALESCE(SUM(amount),0) amount,
+            COALESCE(SUM(subtotal_amount),0) subtotal,
+            COALESCE(SUM(discount_amount),0) discount
+            FROM sale_return_events WHERE sale_id=?""",
             (sale["id"],)
-        ).fetchone()[0]
+        ).fetchone()
+        prior_amount = int(prior["amount"])
+        prior_gross = int(prior["subtotal"])
+        prior_discount = int(prior["discount"])
+
+        # Allocate the invoice discount by cumulative returned gross, not by
+        # rounding each return independently. This prevents discount drift over
+        # multiple returns and guarantees that a fully returned invoice refunds
+        # exactly its original total.
+        cumulative_gross = prior_gross
+        cumulative_discount = prior_discount
+        prepared = []
+        for item, qty, gross in prepared_gross:
+            cumulative_gross += gross
+            target_discount = round(
+                int(sale["discount"]) * min(cumulative_gross, int(sale["subtotal"]))
+                / max(1, int(sale["subtotal"]))
+            )
+            line_discount = max(0, target_discount - cumulative_discount)
+            line_discount = min(gross, line_discount)
+            cumulative_discount += line_discount
+            prepared.append((item, qty, gross, line_discount, max(0, gross - line_discount)))
+
+        discount_amount = sum(line[3] for line in prepared)
         amount = max(0, subtotal_amount - discount_amount)
-        if int(prior_amount) + amount > int(sale["total"]):
-            amount = max(0, int(sale["total"]) - int(prior_amount))
-            discount_amount = max(0, subtotal_amount - amount)
+        remaining_refund = max(0, int(sale["total"]) - prior_amount)
+        if amount > remaining_refund:
+            # Guard against legacy return records created by earlier versions.
+            amount = remaining_refund
+            discount_amount = subtotal_amount - amount
+            adjusted = []
+            remaining_discount = discount_amount
+            for item, qty, gross, _old_discount, _net in prepared:
+                line_discount = min(gross, remaining_discount)
+                remaining_discount -= line_discount
+                adjusted.append((item, qty, gross, line_discount, gross - line_discount))
+            prepared = adjusted
         cur = c.execute(
             """INSERT INTO sale_return_events
             (sale_id,receipt_no,amount,subtotal_amount,discount_amount,reason)
