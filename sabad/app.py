@@ -506,7 +506,8 @@ class MainWindow(QMainWindow):
         self.report_table.setRowCount(len(sales))
         for row, sale in enumerate(sales):
             values = [sale["receipt_no"], sale["created_at"], money(sale["subtotal"]),
-                      money(sale["discount"]), money(sale["total"]), sale["payment_method"]]
+                      money(sale["discount"]), money(sale["total"]), sale["payment_method"],
+                      "مرجوع‌شده" if sale["is_returned"] else "فروش"]
             for col, value in enumerate(values):
                 self.report_table.setItem(row, col, cell(value))
         low = svc.low_stock_products()
@@ -548,7 +549,8 @@ class MainWindow(QMainWindow):
                 for sale in rows:
                     writer.writerow([
                         sale["receipt_no"], sale["created_at"], sale["subtotal"],
-                        sale["discount"], sale["total"], sale["payment_method"]
+                        sale["discount"], sale["total"], sale["payment_method"],
+                        "مرجوع‌شده" if sale["is_returned"] else "فروش"
                     ])
             QMessageBox.information(
                 self, "خروجی آماده شد",
