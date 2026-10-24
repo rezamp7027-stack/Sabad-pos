@@ -4,7 +4,7 @@ import sqlite3
 import uuid
 from datetime import datetime
 
-from .db import DB_PATH, connect, transaction
+from .db import DB_PATH, connect, initialize, transaction
 
 
 class BusinessError(Exception):
@@ -310,6 +310,8 @@ def restore_from(path):
                 destination.close()
         finally:
             source.close()
+        # Older backups may not contain tables added by newer app versions.
+        initialize()
     except BusinessError:
         raise
     except (sqlite3.Error, OSError) as exc:
