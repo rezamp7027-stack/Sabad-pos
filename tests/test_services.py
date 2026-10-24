@@ -60,6 +60,18 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(services.BusinessError):
             self.create_product(name="کالای تکراری")
 
+    def test_financial_summary_uses_recorded_sale_costs_discounts_and_expenses(self):
+        pid = self.create_product(stock=5, buy=20000, sell=30000)
+        services.record_sale([{"product_id": pid, "qty": 2}], discount=5000)
+        services.add_expense("حمل", 3000)
+        summary = services.financial_summary()
+        self.assertEqual(summary["sales_total"], 55000)
+        self.assertEqual(summary["cost_of_goods"], 40000)
+        self.assertEqual(summary["gross_margin"], 20000)
+        self.assertEqual(summary["discounts"], 5000)
+        self.assertEqual(summary["expenses"], 3000)
+        self.assertEqual(summary["estimated_profit"], 12000)
+
     def test_expense_and_backup(self):
         self.create_product()
         services.add_expense("برق", 120000, "قبض ماهانه")
