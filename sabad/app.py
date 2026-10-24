@@ -671,7 +671,8 @@ class MainWindow(QMainWindow):
                     writer.writerow([
                         sale["receipt_no"], sale["created_at"], sale["subtotal"],
                         sale["discount"], sale["total"], sale["payment_method"],
-                        "مرجوع‌شده" if sale["is_returned"] else "فروش"
+                        ("مرجوع‌شده" if sale["is_returned"] else "مرجوعی جزئی")
+                        if (sale["is_returned"] or sale["has_partial_return"]) else "فروش"
                     ])
             QMessageBox.information(
                 self, "خروجی آماده شد",
